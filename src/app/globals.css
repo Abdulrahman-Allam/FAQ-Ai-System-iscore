@@ -1,0 +1,70 @@
+@import "tailwindcss";
+@import "tailwindcss/utilities";
+
+
+
+.icons{
+  background-color: rgba(255, 255, 255, 0.6);
+  color: black;                               
+  width: 3rem; height: 3rem;                      
+  border-radius: 1rem;                        
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+              0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(8px);
+  transition: all 0.3s ease-in-out;
+
+  &:hover{
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+  }
+  /*Tailwind Equivalent:
+  bg-white/60 text-black p-4 rounded-2xl shadow-lg backdrop-blur hover:bg-black/80 hover:text-white transition-all duration-300 ease-in-out
+  */
+}
+
+.iconsDARK{
+  background-color: rgba(0, 0, 0, 0.6);
+  color: white;                               
+  width: 3rem; height: 3rem;                      
+  border-radius: 1rem;                        
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+              0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(8px);
+  transition: all 0.3s ease-in-out;
+
+  &:hover{
+    background-color: rgba(255, 255, 255, 0.8);
+    color: black;
+  }
+  /*Tailwind Equivalent:
+  bg-white/60 text-black p-4 rounded-2xl shadow-lg backdrop-blur hover:bg-black/80 hover:text-white transition-all duration-300 ease-in-out
+  */
+}
+
+.main{
+    background: linear-gradient(-45deg, #4f3795, #3ec1c7, #4f3795, #3ec1c7, #4f3795);
+    animation: gradient 10s ease infinite;
+    background-size: 400% 400%;
+    /*
+    #6f00ff, #00d5ff, #2f00ff, #00d5ff, #d4f8ff
+    */
+}
+.mainDARK{
+    background: linear-gradient(-45deg, #322360, #21676a, #322360, #21676a, #4f3795);
+    animation: gradient 10s ease infinite;
+    background-size: 400% 400%;
+    /*
+    #6f00ff, #00d5ff, #2f00ff, #00d5ff, #d4f8ff
+    */
+}
+@keyframes gradient {
+	0% {
+		background-position: 0% 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+	100% {
+		background-position: 0% 50%;
+	}
+}
