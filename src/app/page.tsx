@@ -8,7 +8,7 @@ import { config } from '@fortawesome/fontawesome-svg-core';
 import '@fortawesome/fontawesome-svg-core/styles.css'; // Import the CSS
 config.autoAddCss = false; // Prevent FontAwesome from adding its CSS automatically
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowRight, faComment, faLanguage } from '@fortawesome/free-solid-svg-icons';
+import { faArrowRight, faArrowLeft, faComment, faLanguage } from '@fortawesome/free-solid-svg-icons';
 
 //Images
 import iscore from '@/images/iscore.png';
@@ -21,6 +21,12 @@ export default function Home() {
 
   const toggleLanguage = () => {
     setIsArabic(!isArabic);
+  };
+
+  const goToChatPage = () => {
+    // Store language preference before navigating
+    localStorage.setItem('isArabic', isArabic.toString());
+    router.push('/chatpage');
   };
 
   return (
@@ -36,36 +42,57 @@ export default function Home() {
         </button>
       </div>
 
-      <div className='flex gap-40'>
-        <div className='flex flex-col space-y-14'>
-          <div className='flex items-center'>
-            <FontAwesomeIcon bounce className='text-6xl mr-4 text-[#3ec1c7]' icon={faComment}/>
-            <Image src={iscore} alt="iScore" width={200}/>
+      {/* Conditional Layout Based on Language */}
+      {isArabic ? (
+        // Arabic Layout: Robot on left, content on right
+        <div className='flex gap-40 justify-between items-center h-full'>
+          <div className='bg-transparent flex-shrink-0'>
+            <Image src={bot} alt="iScore" className='' width={400}/>
           </div>
           
-          {isArabic ? (
-            // Arabic Version
+          <div className='flex flex-col space-y-14 flex-1 items-end pr-10'> {/* Added items-end and pr-10 for better right alignment */}
+            <div className='flex items-center justify-end'> {/* Right align for Arabic */}
+              <Image src={iscore} alt="iScore" width={200}/>
+              <FontAwesomeIcon bounce className='text-6xl ml-4 text-[#3ec1c7]' icon={faComment}/>
+            </div>
+            
+            {/* Arabic Content */}
             <>
-              <div>
+              <div className='text-right w-full'> {/* Added w-full for better alignment */}
                 <p className='font-bold text-white text-6xl'>احصل على إجابات فورية</p>
                 <p className='font-bold text-white text-6xl'>حول قوانين العمل المصرية</p>
                 <p className='font-bold text-[#3ec1c7] text-6xl italic'>مع مساعد iScore الذكي</p>
               </div>
 
-              <div>
+              <div className='text-right w-full'> {/* Added w-full for better alignment */}
                 <p className='text-gray-300 text-2xl italic'>يوفر مساعدة فورية في أسئلة قوانين العمل المصرية</p>
                 <p className='text-gray-300 text-2xl italic'>وحقوق العمال - متاح في أي وقت.</p>
               </div>
-              <button 
-                type='button' 
-                className='bg-white rounded-full py-3 font-extrabold w-[60%] text-2xl flex items-center justify-center text-[#4f3795] hover:text-white hover:bg-[#3ec1c7] transition' 
-                onClick={() => router.push('/chatpage')}
-              >
-               ! لدي سؤال<FontAwesomeIcon className='pl-6 font-extrabold' fontSize={40} icon={faArrowRight}/>
-              </button>
+              
+
+              <div className='flex justify-end w-full'> {/* Added w-full for consistent alignment */}
+                <button 
+                  type='button' 
+                  className='bg-white rounded-full py-3 font-extrabold w-[60%] text-2xl flex items-center justify-center text-[#4f3795] hover:text-white hover:bg-[#3ec1c7] transition' 
+                  onClick={goToChatPage}
+                >
+                  <FontAwesomeIcon className='pr-6 font-extrabold' fontSize={40} icon={faArrowLeft}/>
+                  ! لدي سؤال
+                </button>
+              </div>
             </>
-          ) : (
-            // English Version
+          </div>
+        </div>
+      ) : (
+        // English Layout: Content on left, robot on right
+        <div className='flex gap-40 justify-between items-center h-full'>
+          <div className='flex flex-col space-y-14 flex-1 pl-10'> {/* Added pl-10 for consistent spacing */}
+            <div className='flex items-center'>
+              <FontAwesomeIcon bounce className='text-6xl mr-4 text-[#3ec1c7]' icon={faComment}/>
+              <Image src={iscore} alt="iScore" width={200}/>
+            </div>
+            
+            {/* English Content */}
             <>
               <div>
                 <p className='font-bold text-white text-6xl'>Get Instant answers</p>
@@ -77,20 +104,22 @@ export default function Home() {
                 <p className='text-gray-300 text-2xl italic'>Provides instant help with HR policies, IT issues, and</p>
                 <p className='text-gray-300 text-2xl italic'>company processes - available anytime.</p>
               </div>
+              
               <button 
                 type='button' 
                 className='bg-white rounded-full py-3 font-extrabold w-[60%] text-2xl flex items-center justify-center text-[#4f3795] hover:text-white hover:bg-[#3ec1c7] transition' 
-                onClick={() => router.push('/chatpage')}
+                onClick={goToChatPage}
               >
                 I have a question!<FontAwesomeIcon className='pl-6 font-extrabold' fontSize={40} icon={faArrowRight}/>
               </button>
             </>
-          )}
+          </div>
+          
+          <div className='bg-transparent flex-shrink-0'>
+            <Image src={bot} alt="iScore" className='' width={400}/>
+          </div>
         </div>
-        <div className='bg-transparent'>
-          <Image src={bot} alt="iScore" className='' width={400}/>
-        </div>
-      </div>
+      )}
 
     </div>
   );

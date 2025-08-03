@@ -14,7 +14,8 @@
 # testing
 /coverage
 
-# next.js
+# safetensors
+FAQ-Model/model.safetensors
 
 # production
 /build

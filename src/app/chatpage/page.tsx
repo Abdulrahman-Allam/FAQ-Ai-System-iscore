@@ -29,7 +29,7 @@ const formatTime = (date: Date): string => {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-// Bot reply logic - updated to call Flask API
+// Bot reply logic with translation support
 const botReply = async (userMessage: string, isArabic: boolean = true): Promise<string> => {
   try {
     const response = await fetch('http://localhost:5000/ask', {
@@ -37,7 +37,10 @@ const botReply = async (userMessage: string, isArabic: boolean = true): Promise<
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ question: userMessage }),
+      body: JSON.stringify({ 
+        question: userMessage,
+        language: isArabic ? 'ar' : 'en'  // Send language preference
+      }),
     });
     
     if (!response.ok) {
@@ -46,9 +49,37 @@ const botReply = async (userMessage: string, isArabic: boolean = true): Promise<
     
     const data = await response.json();
     
-    // Return the first answer or a default message
-    if (data.answers && data.answers.length > 0) {
-      return data.answers[0];
+    // Check if we have answers and confidence scores
+    if (data.answers && data.answers.length > 0 && data.confidence_scores && data.confidence_scores.length > 0) {
+      const topAnswer = data.answers[0];
+      let topConfidence = data.confidence_scores[0];
+      
+      // Normalize confidence score if it's above 1.0
+      if (topConfidence > 1.0) {
+        topConfidence = 1 / (1 + Math.exp(-topConfidence));
+      }
+      
+      console.log(`Original score: ${data.confidence_scores[0]}, Normalized: ${topConfidence}`);
+      
+      // Check if confidence is too low (less than 0.1 or 10%)
+      if (topConfidence < 0.1) {
+        return isArabic 
+          ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك حول قوانين العمل المصرية.'
+          : 'Sorry, I could not find a suitable answer to your question about Egyptian labor laws.';
+      }
+      
+      // Show translation info in development (optional)
+      let responseText = topAnswer;
+      if (data.translated_question && !isArabic) {
+        responseText += `\n\n${isArabic ? '(تم ترجمة السؤال والإجابة)' : '(Question and answer were translated)'}`;
+      }
+      
+      // Show confidence score in development
+      const confidencePercentage = (topConfidence * 100).toFixed(1);
+      responseText += `\n\n${isArabic ? `(مستوى الثقة: ${confidencePercentage}%)` : `(Confidence: ${confidencePercentage}%)`}`;
+      
+      return responseText;
+      
     } else {
       return isArabic 
         ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك حول قوانين العمل المصرية.'
@@ -74,19 +105,15 @@ type ChatBoxProps = {
 // ChatBox Component
 function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
 
-  useEffect(() => {
-    resetChat();
-  }, [resetTrigger]); // ← already runs on mount and when resetCounter changes
-
-
-  const [messages, setMessages] = useState<Message[]>([
-    { sender: 'bot', text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك؟' : 'Hello! How can I help you with?', timestamp: formatTime(new Date()) }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
   const [isTyping, setIsTyping] = useState<boolean>(false);
 
+  // Initialize chat when component mounts or language changes
+  useEffect(() => {
+    resetChat();
+  }, [resetTrigger, isArabic]); // Added isArabic dependency
 
-  
   const sendMessage = async (): Promise<void> => {
     if (input.trim() === '') return;
 
@@ -128,9 +155,8 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
   };
 
   const resetChat = (): void => {
-
     const now = new Date();
-    const formattedDate = now.toLocaleDateString(undefined, {
+    const formattedDate = now.toLocaleDateString(isArabic ? 'ar-EG' : 'en-US', {
       weekday: 'short',
       year: 'numeric',
       month: 'short',
@@ -138,18 +164,18 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
     });
   
     setMessages([
-    {
-      sender: 'system',
-      text: `${formattedDate}`,
-      timestamp: formatTime(now)
-    },
-    {
-      sender: 'bot',
-      text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك؟' : 'Hello! How can I help you with?',
-      timestamp: formatTime(new Date())
-    }
-  ]);
-};
+      {
+        sender: 'system',
+        text: `${formattedDate}`,
+        timestamp: formatTime(now)
+      },
+      {
+        sender: 'bot',
+        text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك في قوانين العمل المصرية؟' : 'Hello! How can I help you with Egyptian labor laws?',
+        timestamp: formatTime(new Date())
+      }
+    ]);
+  };
 
   const { theme, setTheme } = useTheme();
   return (
@@ -179,11 +205,10 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
         )
       ))}
 
-
         {isTyping && (
           <div className="flex justify-start">
             <div className="main text-gray-200 px-4 py-2 rounded-2xl max-w-[70%] italic">
-              {isArabic ? 'جاري البحث في قوانين العمل...' : 'Searching labor laws...'}
+              {isArabic ? 'جاري البحث في قوانين العمل المصرية...' : 'Searching Egyptian labor laws...'}
             </div>
           </div>
         )}
@@ -195,11 +220,11 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
         <FontAwesomeIcon className="ml-3 text-white" icon={faMagnifyingGlass}/>
         <input
           type="text"
-          placeholder={isArabic ? "اسأل عن قوانين العمل..." : "Ask about labor laws"}
+          placeholder={isArabic ? "اسأل عن قوانين العمل المصرية..." : "Ask about Egyptian labor laws..."}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="flex-1 focus:outline-none focus:ring-0 rounded-full px-4  py-1.5 text-white" 
+          className="flex-1 focus:outline-none focus:ring-0 rounded-full px-4  py-1.5 text-white placeholder-white/70" 
         />
 
         
@@ -220,15 +245,27 @@ export default function Home() {
   const router = useRouter(); //to switch between pages
 
   const [resetCounter, setResetCounter] = useState(0);
-  const [isArabic, setIsArabic] = useState(true); // Language state
+  const [isArabic, setIsArabic] = useState(false); // Default to English
   
   const handleReset = () => {
     setResetCounter(prev => prev + 1);
   };
 
   const toggleLanguage = () => {
-    setIsArabic(!isArabic);
+    const newLanguage = !isArabic;
+    // Store language preference in localStorage before reload
+    localStorage.setItem('isArabic', newLanguage.toString());
+    // Auto-reload the page when language changes
+    window.location.reload();
   };
+
+  // Load language preference from localStorage on component mount
+  useEffect(() => {
+    const savedLanguage = localStorage.getItem('isArabic');
+    if (savedLanguage !== null) {
+      setIsArabic(savedLanguage === 'true');
+    }
+  }, []);
 
   const { theme, setTheme } = useTheme();
 

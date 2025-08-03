@@ -80,7 +80,7 @@ const formatTime = (date)=>{
         minute: '2-digit'
     });
 };
-// Bot reply logic - updated to call Flask API
+// Bot reply logic with translation support
 const botReply = async (userMessage, isArabic = true)=>{
     try {
         const response = await fetch('http://localhost:5000/ask', {
@@ -89,16 +89,36 @@ const botReply = async (userMessage, isArabic = true)=>{
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                question: userMessage
+                question: userMessage,
+                language: isArabic ? 'ar' : 'en' // Send language preference
             })
         });
         if (!response.ok) {
             throw new Error('Failed to get response from server');
         }
         const data = await response.json();
-        // Return the first answer or a default message
-        if (data.answers && data.answers.length > 0) {
-            return data.answers[0];
+        // Check if we have answers and confidence scores
+        if (data.answers && data.answers.length > 0 && data.confidence_scores && data.confidence_scores.length > 0) {
+            const topAnswer = data.answers[0];
+            let topConfidence = data.confidence_scores[0];
+            // Normalize confidence score if it's above 1.0
+            if (topConfidence > 1.0) {
+                topConfidence = 1 / (1 + Math.exp(-topConfidence));
+            }
+            console.log(`Original score: ${data.confidence_scores[0]}, Normalized: ${topConfidence}`);
+            // Check if confidence is too low (less than 0.1 or 10%)
+            if (topConfidence < 0.1) {
+                return isArabic ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك حول قوانين العمل المصرية.' : 'Sorry, I could not find a suitable answer to your question about Egyptian labor laws.';
+            }
+            // Show translation info in development (optional)
+            let responseText = topAnswer;
+            if (data.translated_question && !isArabic) {
+                responseText += `\n\n${isArabic ? '(تم ترجمة السؤال والإجابة)' : '(Question and answer were translated)'}`;
+            }
+            // Show confidence score in development
+            const confidencePercentage = (topConfidence * 100).toFixed(1);
+            responseText += `\n\n${isArabic ? `(مستوى الثقة: ${confidencePercentage}%)` : `(Confidence: ${confidencePercentage}%)`}`;
+            return responseText;
         } else {
             return isArabic ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك حول قوانين العمل المصرية.' : 'Sorry, I could not find a suitable answer to your question about Egyptian labor laws.';
         }
@@ -109,20 +129,16 @@ const botReply = async (userMessage, isArabic = true)=>{
 };
 // ChatBox Component
 function ChatBox({ resetTrigger, isArabic, setIsArabic }) {
+    const [messages, setMessages] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])([]);
+    const [input, setInput] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])('');
+    const [isTyping, setIsTyping] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false);
+    // Initialize chat when component mounts or language changes
     (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useEffect"])(()=>{
         resetChat();
     }, [
-        resetTrigger
-    ]); // ← already runs on mount and when resetCounter changes
-    const [messages, setMessages] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])([
-        {
-            sender: 'bot',
-            text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك؟' : 'Hello! How can I help you with?',
-            timestamp: formatTime(new Date())
-        }
-    ]);
-    const [input, setInput] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])('');
-    const [isTyping, setIsTyping] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false);
+        resetTrigger,
+        isArabic
+    ]); // Added isArabic dependency
     const sendMessage = async ()=>{
         if (input.trim() === '') return;
         const userMsg = {
@@ -169,7 +185,7 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }) {
     };
     const resetChat = ()=>{
         const now = new Date();
-        const formattedDate = now.toLocaleDateString(undefined, {
+        const formattedDate = now.toLocaleDateString(isArabic ? 'ar-EG' : 'en-US', {
             weekday: 'short',
             year: 'numeric',
             month: 'short',
@@ -183,7 +199,7 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }) {
             },
             {
                 sender: 'bot',
-                text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك؟' : 'Hello! How can I help you with?',
+                text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك في قوانين العمل المصرية؟' : 'Hello! How can I help you with Egyptian labor laws?',
                 timestamp: formatTime(new Date())
             }
         ]);
@@ -207,12 +223,12 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }) {
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/src/app/chatpage/page.tsx",
-                                lineNumber: 162,
+                                lineNumber: 188,
                                 columnNumber: 13
                             }, this)
                         }, index, false, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 161,
+                            lineNumber: 187,
                             columnNumber: 11
                         }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                             className: `flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`,
@@ -224,12 +240,12 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }) {
                                         children: msg.text
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 172,
+                                        lineNumber: 198,
                                         columnNumber: 15
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 169,
+                                    lineNumber: 195,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
@@ -238,34 +254,34 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }) {
                                     children: msg.timestamp
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 174,
+                                    lineNumber: 200,
                                     columnNumber: 13
                                 }, this)
                             ]
                         }, index, true, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 168,
+                            lineNumber: 194,
                             columnNumber: 11
                         }, this)),
                     isTyping && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                         className: "flex justify-start",
                         children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                             className: "main text-gray-200 px-4 py-2 rounded-2xl max-w-[70%] italic",
-                            children: isArabic ? 'جاري البحث في قوانين العمل...' : 'Searching labor laws...'
+                            children: isArabic ? 'جاري البحث في قوانين العمل المصرية...' : 'Searching Egyptian labor laws...'
                         }, void 0, false, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 185,
+                            lineNumber: 210,
                             columnNumber: 13
                         }, this)
                     }, void 0, false, {
                         fileName: "[project]/src/app/chatpage/page.tsx",
-                        lineNumber: 184,
+                        lineNumber: 209,
                         columnNumber: 11
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/app/chatpage/page.tsx",
-                lineNumber: 158,
+                lineNumber: 184,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -277,19 +293,19 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }) {
                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["faMagnifyingGlass"]
                     }, void 0, false, {
                         fileName: "[project]/src/app/chatpage/page.tsx",
-                        lineNumber: 195,
+                        lineNumber: 220,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
                         type: "text",
-                        placeholder: isArabic ? "اسأل عن قوانين العمل..." : "Ask about labor laws",
+                        placeholder: isArabic ? "اسأل عن قوانين العمل المصرية..." : "Ask about Egyptian labor laws...",
                         value: input,
                         onChange: (e)=>setInput(e.target.value),
                         onKeyDown: handleKeyDown,
-                        className: "flex-1 focus:outline-none focus:ring-0 rounded-full px-4  py-1.5 text-white"
+                        className: "flex-1 focus:outline-none focus:ring-0 rounded-full px-4  py-1.5 text-white placeholder-white/70"
                     }, void 0, false, {
                         fileName: "[project]/src/app/chatpage/page.tsx",
-                        lineNumber: 196,
+                        lineNumber: 221,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -300,37 +316,48 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }) {
                             icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["faPaperPlane"]
                         }, void 0, false, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 208,
+                            lineNumber: 233,
                             columnNumber: 11
                         }, this)
                     }, void 0, false, {
                         fileName: "[project]/src/app/chatpage/page.tsx",
-                        lineNumber: 206,
+                        lineNumber: 231,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/app/chatpage/page.tsx",
-                lineNumber: 193,
+                lineNumber: 218,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/app/chatpage/page.tsx",
-        lineNumber: 156,
+        lineNumber: 182,
         columnNumber: 5
     }, this);
 }
 function Home() {
     const router = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$navigation$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useRouter"])(); //to switch between pages
     const [resetCounter, setResetCounter] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(0);
-    const [isArabic, setIsArabic] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(true); // Language state
+    const [isArabic, setIsArabic] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false); // Default to English
     const handleReset = ()=>{
         setResetCounter((prev)=>prev + 1);
     };
     const toggleLanguage = ()=>{
-        setIsArabic(!isArabic);
+        const newLanguage = !isArabic;
+        // Store language preference in localStorage before reload
+        localStorage.setItem('isArabic', newLanguage.toString());
+        // Auto-reload the page when language changes
+        window.location.reload();
     };
+    // Load language preference from localStorage on component mount
+    (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useEffect"])(()=>{
+        const savedLanguage = localStorage.getItem('isArabic');
+        if (savedLanguage !== null) {
+            setIsArabic(savedLanguage === 'true');
+        }
+    }, []);
     const { theme, setTheme } = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2d$themes$2f$dist$2f$index$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useTheme"])();
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
         children: /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -350,12 +377,12 @@ function Home() {
                                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["faHouse"]
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 240,
+                                        lineNumber: 277,
                                         columnNumber: 135
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 240,
+                                    lineNumber: 277,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -366,18 +393,18 @@ function Home() {
                                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["faPlus"]
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 241,
+                                        lineNumber: 278,
                                         columnNumber: 124
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 241,
+                                    lineNumber: 278,
                                     columnNumber: 13
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 239,
+                            lineNumber: 276,
                             columnNumber: 11
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -388,7 +415,7 @@ function Home() {
                                     children: isArabic ? 'تحدث مع' : 'Chat With'
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 244,
+                                    lineNumber: 281,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$image$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["default"], {
@@ -397,13 +424,13 @@ function Home() {
                                     width: 150
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 245,
+                                    lineNumber: 282,
                                     columnNumber: 13
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 243,
+                            lineNumber: 280,
                             columnNumber: 11
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -417,12 +444,12 @@ function Home() {
                                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["faLanguage"]
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 248,
+                                        lineNumber: 285,
                                         columnNumber: 127
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 248,
+                                    lineNumber: 285,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -434,12 +461,12 @@ function Home() {
                                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["faSun"]
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 249,
+                                        lineNumber: 286,
                                         columnNumber: 164
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 249,
+                                    lineNumber: 286,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -449,24 +476,24 @@ function Home() {
                                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["faBars"]
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 250,
+                                        lineNumber: 287,
                                         columnNumber: 102
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 250,
+                                    lineNumber: 287,
                                     columnNumber: 13
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 247,
+                            lineNumber: 284,
                             columnNumber: 11
                         }, this)
                     ]
                 }, void 0, true, {
                     fileName: "[project]/src/app/chatpage/page.tsx",
-                    lineNumber: 238,
+                    lineNumber: 275,
                     columnNumber: 9
                 }, this),
                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -478,23 +505,23 @@ function Home() {
                         setIsArabic: setIsArabic
                     }, void 0, false, {
                         fileName: "[project]/src/app/chatpage/page.tsx",
-                        lineNumber: 257,
+                        lineNumber: 294,
                         columnNumber: 11
                     }, this)
                 }, void 0, false, {
                     fileName: "[project]/src/app/chatpage/page.tsx",
-                    lineNumber: 255,
+                    lineNumber: 292,
                     columnNumber: 9
                 }, this)
             ]
         }, void 0, true, {
             fileName: "[project]/src/app/chatpage/page.tsx",
-            lineNumber: 237,
+            lineNumber: 274,
             columnNumber: 7
         }, this)
     }, void 0, false, {
         fileName: "[project]/src/app/chatpage/page.tsx",
-        lineNumber: 236,
+        lineNumber: 273,
         columnNumber: 5
     }, this);
 }
