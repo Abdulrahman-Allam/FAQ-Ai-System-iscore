@@ -35,7 +35,7 @@ export default function Home() {
       <div className="absolute top-6 right-6 z-10">
         <button 
           onClick={toggleLanguage}
-          className="bg-white/20 backdrop-blur text-white px-4 py-2 rounded-full hover:bg-white/30 transition flex items-center gap-2"
+          className="bg-white/20 backdrop-blur text-white px-4 py-2 rounded-full hover:bg-black/30 hover:bg-black transition flex items-center gap-2"
         >
           <FontAwesomeIcon icon={faLanguage} />
           {isArabic ? 'English' : 'العربية'}
