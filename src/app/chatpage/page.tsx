@@ -4,18 +4,15 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 
-
 // FontAwesome
 import { config } from '@fortawesome/fontawesome-svg-core';
 import '@fortawesome/fontawesome-svg-core/styles.css';
 config.autoAddCss = false;
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faHouse, faPlus, faBars, faSun, faPaperPlane, faMagnifyingGlass, faLanguage } from '@fortawesome/free-solid-svg-icons';
+import { faHouse, faPlus, faBars, faSun, faPaperPlane, faMagnifyingGlass, faLanguage, faThumbsUp, faThumbsDown } from '@fortawesome/free-solid-svg-icons';
 
 // Images
 import iscore from '@/images/iscore.png';
-
-
 
 // Message type
 type Message = {
@@ -29,7 +26,7 @@ const formatTime = (date: Date): string => {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-// Bot reply logic with translation support
+// Bot reply logic - cleaned up for production
 const botReply = async (userMessage: string, isArabic: boolean = true): Promise<string> => {
   try {
     const response = await fetch('http://localhost:5000/ask', {
@@ -39,7 +36,7 @@ const botReply = async (userMessage: string, isArabic: boolean = true): Promise<
       },
       body: JSON.stringify({ 
         question: userMessage,
-        language: isArabic ? 'ar' : 'en'  // Send language preference
+        language: isArabic ? 'ar' : 'en'
       }),
     });
     
@@ -49,36 +46,23 @@ const botReply = async (userMessage: string, isArabic: boolean = true): Promise<
     
     const data = await response.json();
     
-    // Check if we have answers and confidence scores
     if (data.answers && data.answers.length > 0 && data.confidence_scores && data.confidence_scores.length > 0) {
       const topAnswer = data.answers[0];
       let topConfidence = data.confidence_scores[0];
       
-      // Normalize confidence score if it's above 1.0
       if (topConfidence > 1.0) {
         topConfidence = 1 / (1 + Math.exp(-topConfidence));
       }
       
-      console.log(`Original score: ${data.confidence_scores[0]}, Normalized: ${topConfidence}`);
+      console.log(`Confidence score: ${topConfidence}`);
       
-      // Check if confidence is too low (less than 0.1 or 10%)
       if (topConfidence < 0.1) {
         return isArabic 
           ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك حول قوانين العمل المصرية.'
           : 'Sorry, I could not find a suitable answer to your question about Egyptian labor laws.';
       }
       
-      // Show translation info in development (optional)
-      let responseText = topAnswer;
-      if (data.translated_question && !isArabic) {
-        responseText += `\n\n${isArabic ? '(تم ترجمة السؤال والإجابة)' : '(Question and answer were translated)'}`;
-      }
-      
-      // Show confidence score in development
-      const confidencePercentage = (topConfidence * 100).toFixed(1);
-      responseText += `\n\n${isArabic ? `(مستوى الثقة: ${confidencePercentage}%)` : `(Confidence: ${confidencePercentage}%)`}`;
-      
-      return responseText;
+      return topAnswer;
       
     } else {
       return isArabic 
@@ -99,20 +83,25 @@ type ChatBoxProps = {
   setIsArabic: (value: boolean) => void;
 };
 
-
-
-
 // ChatBox Component
 function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
-
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
   const [isTyping, setIsTyping] = useState<boolean>(false);
+  const [feedback, setFeedback] = useState<{ [key: number]: 'up' | 'down' | null }>({});
+  const [mounted, setMounted] = useState(false);
+
+  // Fix hydration issue
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Initialize chat when component mounts or language changes
   useEffect(() => {
-    resetChat();
-  }, [resetTrigger, isArabic]); // Added isArabic dependency
+    if (mounted) {
+      resetChat();
+    }
+  }, [resetTrigger, isArabic, mounted]);
 
   const sendMessage = async (): Promise<void> => {
     if (input.trim() === '') return;
@@ -154,7 +143,22 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
     }
   };
 
+  const handleFeedback = (messageIndex: number, feedbackType: 'up' | 'down') => {
+    const currentFeedback = feedback[messageIndex];
+    const newFeedback = currentFeedback === feedbackType ? null : feedbackType;
+    
+    setFeedback(prev => ({
+      ...prev,
+      [messageIndex]: newFeedback
+    }));
+
+    const message = messages[messageIndex];
+    console.log(`Feedback for message: "${message.text.substring(0, 50)}..." - ${newFeedback || 'removed'}`);
+  };
+
   const resetChat = (): void => {
+    if (!mounted) return;
+    
     const now = new Date();
     const formattedDate = now.toLocaleDateString(isArabic ? 'ar-EG' : 'en-US', {
       weekday: 'short',
@@ -171,13 +175,25 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
       },
       {
         sender: 'bot',
-        text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك في قوانين العمل المصرية؟' : 'Hello! How can I help you with Egyptian labor laws?',
+        text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك في قوانين العمل؟' : 'Hello! How can I help you with Company laws?',
         timestamp: formatTime(new Date())
       }
     ]);
+    
+    setFeedback({});
   };
 
   const { theme, setTheme } = useTheme();
+
+  // Don't render until mounted to prevent hydration mismatch
+  if (!mounted) {
+    return (
+      <div className="flex flex-col h-full justify-center items-center">
+        <div className="text-gray-500">Loading...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full justify-between p-4">
       {/* Chat messages */}
@@ -197,6 +213,45 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
               ${msg.sender === 'user' ? 'bg-[#4f3795] text-white' : 'bg-[#3ec1c7] text-white'}`}>
               <p>{msg.text}</p>
             </div>
+            
+            {/* Feedback buttons for bot messages only */}
+            {msg.sender === 'bot' && index > 1 && (
+              <div className="flex items-center gap-2 mt-2 px-2">
+                <button
+                  onClick={() => handleFeedback(index, 'up')}
+                  className={`p-1 rounded-full transition-colors duration-200 ${
+                    feedback[index] === 'up' 
+                      ? 'bg-green-500 text-white' 
+                      : 'bg-gray-200 text-gray-600 hover:bg-green-200 hover:text-green-600'
+                  }`}
+                  title={isArabic ? 'مفيد' : 'Helpful'}
+                >
+                  <FontAwesomeIcon icon={faThumbsUp} className="text-sm" />
+                </button>
+                
+                <button
+                  onClick={() => handleFeedback(index, 'down')}
+                  className={`p-1 rounded-full transition-colors duration-200 ${
+                    feedback[index] === 'down' 
+                      ? 'bg-red-500 text-white' 
+                      : 'bg-gray-200 text-gray-600 hover:bg-red-200 hover:text-red-600'
+                  }`}
+                  title={isArabic ? 'غير مفيد' : 'Not helpful'}
+                >
+                  <FontAwesomeIcon icon={faThumbsDown} className="text-sm" />
+                </button>
+                
+                {feedback[index] && (
+                  <span className={`text-xs ml-2 ${theme === 'dark' ? 'text-white' : 'text-gray-600'}`}>
+                    {isArabic 
+                      ? (feedback[index] === 'up' ? 'شكراً لتقييمك!' : 'شكراً للملاحظة!')
+                      : (feedback[index] === 'up' ? 'Thanks for your feedback!' : 'Thanks for the feedback!')
+                    }
+                  </span>
+                )}
+              </div>
+            )}
+            
             <p className={`text-xs mt-1 px-2
                       ${theme === 'dark' ? 'text-white' : 'text-gray-600'}`}>
               {msg.timestamp}
@@ -220,14 +275,13 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
         <FontAwesomeIcon className="ml-3 text-white" icon={faMagnifyingGlass}/>
         <input
           type="text"
-          placeholder={isArabic ? "اسأل عن قوانين العمل المصرية..." : "Ask about Egyptian labor laws..."}
+          placeholder={isArabic ? "اسأل عن قوانين العمل..." : "Ask about the laws..."}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           className="flex-1 focus:outline-none focus:ring-0 rounded-full px-4  py-1.5 text-white placeholder-white/70" 
         />
 
-        
         <button onClick={sendMessage} className={`ml-3 bg-white px-4 py-2 rounded-full transition 
                          ${theme === 'dark' ? 'text-[#4f3795] hover:bg-[#3ec1c7] hover:text-white' : 'text-[#3ec1c7] hover:bg-[#4f3795] hover:text-white '}`}>
           <FontAwesomeIcon icon={faPaperPlane}/>
@@ -237,15 +291,17 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
   );
 }
 
-
-
 // Main Page
 export default function Home() {
-
-  const router = useRouter(); //to switch between pages
-
+  const router = useRouter();
   const [resetCounter, setResetCounter] = useState(0);
-  const [isArabic, setIsArabic] = useState(false); // Default to English
+  const [isArabic, setIsArabic] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // Fix hydration issue
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   
   const handleReset = () => {
     setResetCounter(prev => prev + 1);
@@ -253,21 +309,32 @@ export default function Home() {
 
   const toggleLanguage = () => {
     const newLanguage = !isArabic;
-    // Store language preference in localStorage before reload
-    localStorage.setItem('isArabic', newLanguage.toString());
-    // Auto-reload the page when language changes
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('isArabic', newLanguage.toString());
+    }
     window.location.reload();
   };
 
   // Load language preference from localStorage on component mount
   useEffect(() => {
-    const savedLanguage = localStorage.getItem('isArabic');
-    if (savedLanguage !== null) {
-      setIsArabic(savedLanguage === 'true');
+    if (mounted && typeof window !== 'undefined') {
+      const savedLanguage = localStorage.getItem('isArabic');
+      if (savedLanguage !== null) {
+        setIsArabic(savedLanguage === 'true');
+      }
     }
-  }, []);
+  }, [mounted]);
 
   const { theme, setTheme } = useTheme();
+
+  // Don't render until mounted to prevent hydration mismatch
+  if (!mounted) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="text-gray-500">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -293,8 +360,6 @@ export default function Home() {
                       ${theme === 'dark' ? 'bg-gray-800' : 'bg-gray-100'}`}>
           <ChatBox resetTrigger={resetCounter} isArabic={isArabic} setIsArabic={setIsArabic}/>
         </div>
-
-
       </div>
     </div>
   );

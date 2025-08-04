@@ -60,12 +60,12 @@ export default function Home() {
             <>
               <div className='text-right w-full'> {/* Added w-full for better alignment */}
                 <p className='font-bold text-white text-6xl'>احصل على إجابات فورية</p>
-                <p className='font-bold text-white text-6xl'>حول قوانين العمل المصرية</p>
-                <p className='font-bold text-[#3ec1c7] text-6xl italic'>مع مساعد iScore الذكي</p>
+                <p className='font-bold text-white text-6xl'>حول قوانين عمل الشركة</p>
+                <p className='font-bold text-[#3ec1c7] text-6xl italic'>الذكي iScore مع مساعد</p>
               </div>
 
               <div className='text-right w-full'> {/* Added w-full for better alignment */}
-                <p className='text-gray-300 text-2xl italic'>يوفر مساعدة فورية في أسئلة قوانين العمل المصرية</p>
+                <p className='text-gray-300 text-2xl italic'>يوفر مساعدة فورية في أسئلة قوانين العمل</p>
                 <p className='text-gray-300 text-2xl italic'>وحقوق العمال - متاح في أي وقت.</p>
               </div>
               
