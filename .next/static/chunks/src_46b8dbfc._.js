@@ -57,14 +57,7 @@ __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f
 ;
 ;
 ;
-// Utility: Format time
-const formatTime = (date)=>{
-    return date.toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-};
-// Bot reply logic - cleaned up for production
+// Bot reply logic with database integration
 const botReply = async function(userMessage) {
     let isArabic = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : true;
     try {
@@ -82,26 +75,33 @@ const botReply = async function(userMessage) {
             throw new Error('Failed to get response from server');
         }
         const data = await response.json();
-        if (data.answers && data.answers.length > 0 && data.confidence_scores && data.confidence_scores.length > 0) {
-            const topAnswer = data.answers[0];
-            let topConfidence = data.confidence_scores[0];
-            if (topConfidence > 1.0) {
-                topConfidence = 1 / (1 + Math.exp(-topConfidence));
-            }
-            console.log("Confidence score: ".concat(topConfidence));
-            if (topConfidence < 0.1) {
-                return isArabic ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك حول قوانين العمل المصرية.' : 'Sorry, I could not find a suitable answer to your question about Egyptian labor laws.';
-            }
-            return topAnswer;
+        if (data.answers && data.answers.length > 0) {
+            return {
+                text: data.answers[0],
+                questionId: data.question_id || null
+            };
         } else {
-            return isArabic ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك حول قوانين العمل المصرية.' : 'Sorry, I could not find a suitable answer to your question about Egyptian labor laws.';
+            return {
+                text: isArabic ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك، لقد أرسلنا سؤالك لفريقنا للإجابة عليه في أقرب وقت ممكن.' : 'Sorry, I could not find a suitable answer to your question, we sent this question to our team to answer you as soon as possible.',
+                questionId: null
+            };
         }
     } catch (error) {
         console.error('Error calling FAQ API:', error);
-        return isArabic ? 'عذرًا، حدث خطأ في الاتصال بالخادم. تأكد من تشغيل الخادم على المنفذ 5000.' : 'Sorry, there was an error connecting to the server. Make sure the server is running on port 5000.';
+        return {
+            text: isArabic ? 'عذرًا، حدث خطأ في الاتصال بالخادم. تأكد من تشغيل الخادم على المنفذ 5000.' : 'Sorry, there was an error connecting to the server. Make sure the server is running on port 5000.',
+            questionId: null
+        };
     }
 };
-// ChatBox Component
+// Utility: Format time
+const formatTime = (date)=>{
+    return date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+};
+// ChatBox Component with database integration
 function ChatBox(param) {
     let { resetTrigger, isArabic, setIsArabic } = param;
     _s();
@@ -142,11 +142,12 @@ function ChatBox(param) {
         setInput('');
         setIsTyping(true);
         try {
-            const replyText = await botReply(userMsg.text, isArabic);
+            const { text: replyText, questionId } = await botReply(userMsg.text, isArabic);
             const reply = {
                 sender: 'bot',
                 text: replyText,
-                timestamp: formatTime(new Date())
+                timestamp: formatTime(new Date()),
+                questionId: questionId
             };
             setMessages((prev)=>[
                     ...prev,
@@ -172,7 +173,7 @@ function ChatBox(param) {
             sendMessage();
         }
     };
-    const handleFeedback = (messageIndex, feedbackType)=>{
+    const handleFeedback = async (messageIndex, feedbackType)=>{
         const currentFeedback = feedback[messageIndex];
         const newFeedback = currentFeedback === feedbackType ? null : feedbackType;
         setFeedback((prev)=>({
@@ -181,31 +182,44 @@ function ChatBox(param) {
             }));
         const message = messages[messageIndex];
         console.log('Feedback for message: "'.concat(message.text.substring(0, 50), '..." - ').concat(newFeedback || 'removed'));
+        // Send feedback to database if questionId exists
+        if (message.questionId && newFeedback !== null) {
+            try {
+                await fetch('http://localhost:5000/feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        question_id: message.questionId,
+                        is_good: newFeedback === 'up'
+                    })
+                });
+                console.log("Feedback sent to database: ".concat(newFeedback === 'up' ? 'positive' : 'negative'));
+            } catch (error) {
+                console.error('Error sending feedback:', error);
+            }
+        }
     };
     const resetChat = ()=>{
         if (!mounted) return;
         const now = new Date();
-        const formattedDate = now.toLocaleDateString(isArabic ? 'ar-EG' : 'en-US', {
-            weekday: 'short',
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        });
+        const today = isArabic ? 'اليوم' : 'Today';
         setMessages([
             {
                 sender: 'system',
-                text: "".concat(formattedDate),
+                text: today,
                 timestamp: formatTime(now)
             },
             {
                 sender: 'bot',
-                text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك في قوانين العمل؟' : 'Hello! How can I help you with Company laws?',
+                text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك في قوانين العمل المصرية؟' : 'Hello! How can I help you with Egyptian labor laws?',
                 timestamp: formatTime(new Date())
             }
         ]);
         setFeedback({});
     };
-    const { theme, setTheme } = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2d$themes$2f$dist$2f$index$2e$mjs__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useTheme"])();
+    const { theme } = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2d$themes$2f$dist$2f$index$2e$mjs__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useTheme"])();
     // Don't render until mounted to prevent hydration mismatch
     if (!mounted) {
         return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -215,12 +229,12 @@ function ChatBox(param) {
                 children: "Loading..."
             }, void 0, false, {
                 fileName: "[project]/src/app/chatpage/page.tsx",
-                lineNumber: 192,
+                lineNumber: 202,
                 columnNumber: 9
             }, this)
         }, void 0, false, {
             fileName: "[project]/src/app/chatpage/page.tsx",
-            lineNumber: 191,
+            lineNumber: 201,
             columnNumber: 7
         }, this);
     }
@@ -241,12 +255,12 @@ function ChatBox(param) {
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/src/app/chatpage/page.tsx",
-                                lineNumber: 204,
+                                lineNumber: 214,
                                 columnNumber: 13
                             }, this)
                         }, index, false, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 203,
+                            lineNumber: 213,
                             columnNumber: 11
                         }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                             className: "flex flex-col ".concat(msg.sender === 'user' ? 'items-end' : 'items-start'),
@@ -257,12 +271,12 @@ function ChatBox(param) {
                                         children: msg.text
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 214,
+                                        lineNumber: 224,
                                         columnNumber: 15
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 211,
+                                    lineNumber: 221,
                                     columnNumber: 13
                                 }, this),
                                 msg.sender === 'bot' && index > 1 && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -277,12 +291,12 @@ function ChatBox(param) {
                                                 className: "text-sm"
                                             }, void 0, false, {
                                                 fileName: "[project]/src/app/chatpage/page.tsx",
-                                                lineNumber: 229,
+                                                lineNumber: 239,
                                                 columnNumber: 19
                                             }, this)
                                         }, void 0, false, {
                                             fileName: "[project]/src/app/chatpage/page.tsx",
-                                            lineNumber: 220,
+                                            lineNumber: 230,
                                             columnNumber: 17
                                         }, this),
                                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -294,12 +308,12 @@ function ChatBox(param) {
                                                 className: "text-sm"
                                             }, void 0, false, {
                                                 fileName: "[project]/src/app/chatpage/page.tsx",
-                                                lineNumber: 241,
+                                                lineNumber: 251,
                                                 columnNumber: 19
                                             }, this)
                                         }, void 0, false, {
                                             fileName: "[project]/src/app/chatpage/page.tsx",
-                                            lineNumber: 232,
+                                            lineNumber: 242,
                                             columnNumber: 17
                                         }, this),
                                         feedback[index] && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("span", {
@@ -307,13 +321,13 @@ function ChatBox(param) {
                                             children: isArabic ? feedback[index] === 'up' ? 'شكراً لتقييمك!' : 'شكراً للملاحظة!' : feedback[index] === 'up' ? 'Thanks for your feedback!' : 'Thanks for the feedback!'
                                         }, void 0, false, {
                                             fileName: "[project]/src/app/chatpage/page.tsx",
-                                            lineNumber: 245,
+                                            lineNumber: 255,
                                             columnNumber: 19
                                         }, this)
                                     ]
                                 }, void 0, true, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 219,
+                                    lineNumber: 229,
                                     columnNumber: 15
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
@@ -321,13 +335,13 @@ function ChatBox(param) {
                                     children: msg.timestamp
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 255,
+                                    lineNumber: 265,
                                     columnNumber: 13
                                 }, this)
                             ]
                         }, index, true, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 210,
+                            lineNumber: 220,
                             columnNumber: 11
                         }, this)),
                     isTyping && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -337,18 +351,18 @@ function ChatBox(param) {
                             children: isArabic ? 'جاري البحث في قوانين العمل المصرية...' : 'Searching Egyptian labor laws...'
                         }, void 0, false, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 265,
+                            lineNumber: 275,
                             columnNumber: 13
                         }, this)
                     }, void 0, false, {
                         fileName: "[project]/src/app/chatpage/page.tsx",
-                        lineNumber: 264,
+                        lineNumber: 274,
                         columnNumber: 11
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/app/chatpage/page.tsx",
-                lineNumber: 200,
+                lineNumber: 210,
                 columnNumber: 7
             }, this),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -359,19 +373,19 @@ function ChatBox(param) {
                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$client$5d$__$28$ecmascript$29$__["faMagnifyingGlass"]
                     }, void 0, false, {
                         fileName: "[project]/src/app/chatpage/page.tsx",
-                        lineNumber: 275,
+                        lineNumber: 285,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("input", {
                         type: "text",
-                        placeholder: isArabic ? "اسأل عن قوانين العمل..." : "Ask about the laws...",
+                        placeholder: isArabic ? "اسأل عن قوانين العمل المصرية..." : "Ask about Egyptian labor laws...",
                         value: input,
                         onChange: (e)=>setInput(e.target.value),
                         onKeyDown: handleKeyDown,
                         className: "flex-1 focus:outline-none focus:ring-0 rounded-full px-4  py-1.5 text-white placeholder-white/70"
                     }, void 0, false, {
                         fileName: "[project]/src/app/chatpage/page.tsx",
-                        lineNumber: 276,
+                        lineNumber: 286,
                         columnNumber: 9
                     }, this),
                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -381,28 +395,28 @@ function ChatBox(param) {
                             icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$client$5d$__$28$ecmascript$29$__["faPaperPlane"]
                         }, void 0, false, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 287,
+                            lineNumber: 297,
                             columnNumber: 11
                         }, this)
                     }, void 0, false, {
                         fileName: "[project]/src/app/chatpage/page.tsx",
-                        lineNumber: 285,
+                        lineNumber: 295,
                         columnNumber: 9
                     }, this)
                 ]
             }, void 0, true, {
                 fileName: "[project]/src/app/chatpage/page.tsx",
-                lineNumber: 273,
+                lineNumber: 283,
                 columnNumber: 7
             }, this)
         ]
     }, void 0, true, {
         fileName: "[project]/src/app/chatpage/page.tsx",
-        lineNumber: 198,
+        lineNumber: 208,
         columnNumber: 5
     }, this);
 }
-_s(ChatBox, "ZkxzE6wIARITPJ0EotP+h8VupiU=", false, function() {
+_s(ChatBox, "wJhOh7El7t1HMVwPYCdPIV3VCLQ=", false, function() {
     return [
         __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2d$themes$2f$dist$2f$index$2e$mjs__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useTheme"]
     ];
@@ -453,12 +467,12 @@ function Home() {
                 children: "Loading..."
             }, void 0, false, {
                 fileName: "[project]/src/app/chatpage/page.tsx",
-                lineNumber: 334,
+                lineNumber: 344,
                 columnNumber: 9
             }, this)
         }, void 0, false, {
             fileName: "[project]/src/app/chatpage/page.tsx",
-            lineNumber: 333,
+            lineNumber: 343,
             columnNumber: 7
         }, this);
     }
@@ -480,12 +494,12 @@ function Home() {
                                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$client$5d$__$28$ecmascript$29$__["faHouse"]
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 344,
+                                        lineNumber: 354,
                                         columnNumber: 135
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 344,
+                                    lineNumber: 354,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -496,18 +510,18 @@ function Home() {
                                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$client$5d$__$28$ecmascript$29$__["faPlus"]
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 345,
+                                        lineNumber: 355,
                                         columnNumber: 124
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 345,
+                                    lineNumber: 355,
                                     columnNumber: 13
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 343,
+                            lineNumber: 353,
                             columnNumber: 11
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -518,7 +532,7 @@ function Home() {
                                     children: isArabic ? 'تحدث مع' : 'Chat With'
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 348,
+                                    lineNumber: 358,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$image$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["default"], {
@@ -527,13 +541,13 @@ function Home() {
                                     width: 150
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 349,
+                                    lineNumber: 359,
                                     columnNumber: 13
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 347,
+                            lineNumber: 357,
                             columnNumber: 11
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -547,12 +561,12 @@ function Home() {
                                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$client$5d$__$28$ecmascript$29$__["faLanguage"]
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 352,
+                                        lineNumber: 362,
                                         columnNumber: 127
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 352,
+                                    lineNumber: 362,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -564,12 +578,12 @@ function Home() {
                                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$client$5d$__$28$ecmascript$29$__["faSun"]
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 353,
+                                        lineNumber: 363,
                                         columnNumber: 164
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 353,
+                                    lineNumber: 363,
                                     columnNumber: 13
                                 }, this),
                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
@@ -579,24 +593,24 @@ function Home() {
                                         icon: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$fortawesome$2f$free$2d$solid$2d$svg$2d$icons$2f$index$2e$mjs__$5b$app$2d$client$5d$__$28$ecmascript$29$__["faBars"]
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chatpage/page.tsx",
-                                        lineNumber: 354,
+                                        lineNumber: 364,
                                         columnNumber: 102
                                     }, this)
                                 }, void 0, false, {
                                     fileName: "[project]/src/app/chatpage/page.tsx",
-                                    lineNumber: 354,
+                                    lineNumber: 364,
                                     columnNumber: 13
                                 }, this)
                             ]
                         }, void 0, true, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
-                            lineNumber: 351,
+                            lineNumber: 361,
                             columnNumber: 11
                         }, this)
                     ]
                 }, void 0, true, {
                     fileName: "[project]/src/app/chatpage/page.tsx",
-                    lineNumber: 342,
+                    lineNumber: 352,
                     columnNumber: 9
                 }, this),
                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -607,23 +621,23 @@ function Home() {
                         setIsArabic: setIsArabic
                     }, void 0, false, {
                         fileName: "[project]/src/app/chatpage/page.tsx",
-                        lineNumber: 361,
+                        lineNumber: 371,
                         columnNumber: 11
                     }, this)
                 }, void 0, false, {
                     fileName: "[project]/src/app/chatpage/page.tsx",
-                    lineNumber: 359,
+                    lineNumber: 369,
                     columnNumber: 9
                 }, this)
             ]
         }, void 0, true, {
             fileName: "[project]/src/app/chatpage/page.tsx",
-            lineNumber: 341,
+            lineNumber: 351,
             columnNumber: 7
         }, this)
     }, void 0, false, {
         fileName: "[project]/src/app/chatpage/page.tsx",
-        lineNumber: 340,
+        lineNumber: 350,
         columnNumber: 5
     }, this);
 }

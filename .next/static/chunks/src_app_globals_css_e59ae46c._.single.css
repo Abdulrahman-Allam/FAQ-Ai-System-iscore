@@ -559,6 +559,10 @@
     display: flex;
   }
 
+  .table {
+    display: table;
+  }
+
   .h-\[10\%\] {
     height: 10%;
   }

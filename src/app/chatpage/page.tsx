@@ -14,20 +14,8 @@ import { faHouse, faPlus, faBars, faSun, faPaperPlane, faMagnifyingGlass, faLang
 // Images
 import iscore from '@/images/iscore.png';
 
-// Message type
-type Message = {
-  sender: 'user' | 'bot' | 'system';
-  text: string;
-  timestamp: string;
-};
-
-// Utility: Format time
-const formatTime = (date: Date): string => {
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
-// Bot reply logic - cleaned up for production
-const botReply = async (userMessage: string, isArabic: boolean = true): Promise<string> => {
+// Bot reply logic with database integration
+const botReply = async (userMessage: string, isArabic: boolean = true): Promise<{text: string, questionId: number | null}> => {
   try {
     const response = await fetch('http://localhost:5000/ask', {
       method: 'POST',
@@ -46,35 +34,41 @@ const botReply = async (userMessage: string, isArabic: boolean = true): Promise<
     
     const data = await response.json();
     
-    if (data.answers && data.answers.length > 0 && data.confidence_scores && data.confidence_scores.length > 0) {
-      const topAnswer = data.answers[0];
-      let topConfidence = data.confidence_scores[0];
-      
-      if (topConfidence > 1.0) {
-        topConfidence = 1 / (1 + Math.exp(-topConfidence));
-      }
-      
-      console.log(`Confidence score: ${topConfidence}`);
-      
-      if (topConfidence < 0.1) {
-        return isArabic 
-          ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك حول قوانين العمل المصرية.'
-          : 'Sorry, I could not find a suitable answer to your question about Egyptian labor laws.';
-      }
-      
-      return topAnswer;
-      
+    if (data.answers && data.answers.length > 0) {
+      return {
+        text: data.answers[0],
+        questionId: data.question_id || null
+      };
     } else {
-      return isArabic 
-        ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك حول قوانين العمل المصرية.'
-        : 'Sorry, I could not find a suitable answer to your question about Egyptian labor laws.';
+      return {
+        text: isArabic 
+          ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك، لقد أرسلنا سؤالك لفريقنا للإجابة عليه في أقرب وقت ممكن.'
+          : 'Sorry, I could not find a suitable answer to your question, we sent this question to our team to answer you as soon as possible.',
+        questionId: null
+      };
     }
   } catch (error) {
     console.error('Error calling FAQ API:', error);
-    return isArabic 
-      ? 'عذرًا، حدث خطأ في الاتصال بالخادم. تأكد من تشغيل الخادم على المنفذ 5000.'
-      : 'Sorry, there was an error connecting to the server. Make sure the server is running on port 5000.';
+    return {
+      text: isArabic 
+        ? 'عذرًا، حدث خطأ في الاتصال بالخادم. تأكد من تشغيل الخادم على المنفذ 5000.'
+        : 'Sorry, there was an error connecting to the server. Make sure the server is running on port 5000.',
+      questionId: null
+    };
   }
+};
+
+// Message type
+type Message = {
+  sender: 'user' | 'bot' | 'system';
+  text: string;
+  timestamp: string;
+  questionId?: number | null;
+};
+
+// Utility: Format time
+const formatTime = (date: Date): string => {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
 type ChatBoxProps = {
@@ -83,7 +77,7 @@ type ChatBoxProps = {
   setIsArabic: (value: boolean) => void;
 };
 
-// ChatBox Component
+// ChatBox Component with database integration
 function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
@@ -117,11 +111,12 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
     setIsTyping(true);
 
     try {
-      const replyText = await botReply(userMsg.text, isArabic);
+      const { text: replyText, questionId } = await botReply(userMsg.text, isArabic);
       const reply: Message = {
         sender: 'bot',
         text: replyText,
-        timestamp: formatTime(new Date())
+        timestamp: formatTime(new Date()),
+        questionId: questionId
       };
       setMessages((prev) => [...prev, reply]);
     } catch (error) {
@@ -143,7 +138,7 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
     }
   };
 
-  const handleFeedback = (messageIndex: number, feedbackType: 'up' | 'down') => {
+  const handleFeedback = async (messageIndex: number, feedbackType: 'up' | 'down') => {
     const currentFeedback = feedback[messageIndex];
     const newFeedback = currentFeedback === feedbackType ? null : feedbackType;
     
@@ -154,28 +149,43 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
 
     const message = messages[messageIndex];
     console.log(`Feedback for message: "${message.text.substring(0, 50)}..." - ${newFeedback || 'removed'}`);
+    
+    // Send feedback to database if questionId exists
+    if (message.questionId && newFeedback !== null) {
+      try {
+        await fetch('http://localhost:5000/feedback', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            question_id: message.questionId,
+            is_good: newFeedback === 'up'
+          }),
+        });
+        
+        console.log(`Feedback sent to database: ${newFeedback === 'up' ? 'positive' : 'negative'}`);
+      } catch (error) {
+        console.error('Error sending feedback:', error);
+      }
+    }
   };
 
   const resetChat = (): void => {
     if (!mounted) return;
     
     const now = new Date();
-    const formattedDate = now.toLocaleDateString(isArabic ? 'ar-EG' : 'en-US', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    const today = isArabic ? 'اليوم' : 'Today';
   
     setMessages([
       {
         sender: 'system',
-        text: `${formattedDate}`,
+        text: today,
         timestamp: formatTime(now)
       },
       {
         sender: 'bot',
-        text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك في قوانين العمل؟' : 'Hello! How can I help you with Company laws?',
+        text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك في قوانين العمل المصرية؟' : 'Hello! How can I help you with Egyptian labor laws?',
         timestamp: formatTime(new Date())
       }
     ]);
@@ -183,7 +193,7 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
     setFeedback({});
   };
 
-  const { theme, setTheme } = useTheme();
+  const { theme } = useTheme();
 
   // Don't render until mounted to prevent hydration mismatch
   if (!mounted) {
@@ -275,7 +285,7 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
         <FontAwesomeIcon className="ml-3 text-white" icon={faMagnifyingGlass}/>
         <input
           type="text"
-          placeholder={isArabic ? "اسأل عن قوانين العمل..." : "Ask about the laws..."}
+          placeholder={isArabic ? "اسأل عن قوانين العمل المصرية..." : "Ask about Egyptian labor laws..."}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
