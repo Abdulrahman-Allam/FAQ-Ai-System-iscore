@@ -14,8 +14,25 @@ import { faHouse, faPlus, faBars, faSun, faPaperPlane, faMagnifyingGlass, faLang
 // Images
 import iscore from '@/images/iscore.png';
 
-// Bot reply logic with database integration
-const botReply = async (userMessage: string, isArabic: boolean = true): Promise<{text: string, questionId: number | null}> => {
+// Add the missing formatTime function
+const formatTime = (date: Date): string => {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+// Add ChatBoxProps type definition
+type ChatBoxProps = {
+  resetTrigger: number;
+  isArabic: boolean;
+  setIsArabic: (value: boolean) => void;
+};
+
+// Add session ID generation
+const generateSessionId = () => {
+  return 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+};
+
+// Bot reply logic with vacation query support
+const botReply = async (userMessage: string, isArabic: boolean = true, sessionId: string, isCommonQuestion: boolean = false): Promise<{text: string, questionId: number | null, status: string}> => {
   try {
     const response = await fetch('http://localhost:5000/ask', {
       method: 'POST',
@@ -24,7 +41,9 @@ const botReply = async (userMessage: string, isArabic: boolean = true): Promise<
       },
       body: JSON.stringify({ 
         question: userMessage,
-        language: isArabic ? 'ar' : 'en'
+        language: isArabic ? 'ar' : 'en',
+        session_id: sessionId,
+        is_common_question: isCommonQuestion  // NEW: Flag for dropdown clicks
       }),
     });
     
@@ -37,14 +56,16 @@ const botReply = async (userMessage: string, isArabic: boolean = true): Promise<
     if (data.answers && data.answers.length > 0) {
       return {
         text: data.answers[0],
-        questionId: data.question_id || null
+        questionId: data.question_id || null,
+        status: data.status || 'answered'
       };
     } else {
       return {
         text: isArabic 
           ? 'عذرًا، لم أجد إجابة مناسبة لسؤالك، لقد أرسلنا سؤالك لفريقنا للإجابة عليه في أقرب وقت ممكن.'
           : 'Sorry, I could not find a suitable answer to your question, we sent this question to our team to answer you as soon as possible.',
-        questionId: null
+        questionId: null,
+        status: 'pending'
       };
     }
   } catch (error) {
@@ -53,37 +74,102 @@ const botReply = async (userMessage: string, isArabic: boolean = true): Promise<
       text: isArabic 
         ? 'عذرًا، حدث خطأ في الاتصال بالخادم. تأكد من تشغيل الخادم على المنفذ 5000.'
         : 'Sorry, there was an error connecting to the server. Make sure the server is running on port 5000.',
-      questionId: null
+      questionId: null,
+      status: 'error'
     };
   }
 };
 
-// Message type
+// Update Message type
 type Message = {
   sender: 'user' | 'bot' | 'system';
   text: string;
   timestamp: string;
   questionId?: number | null;
+  status?: string;
 };
 
-// Utility: Format time
-const formatTime = (date: Date): string => {
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
+// Add Common Questions Component
+function CommonQuestionsDropdown({ isArabic, onQuestionSelect }: { 
+  isArabic: boolean; 
+  onQuestionSelect: (question: string) => void; 
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [questions, setQuestions] = useState<Array<{id: string, text: string}>>([]);
+  const { theme } = useTheme();
 
-type ChatBoxProps = {
-  resetTrigger: number;
-  isArabic: boolean;
-  setIsArabic: (value: boolean) => void;
-};
+  useEffect(() => {
+    fetchCommonQuestions();
+  }, [isArabic]);
 
-// ChatBox Component with database integration
+  const fetchCommonQuestions = async () => {
+    try {
+      const response = await fetch(`http://localhost:5000/common-questions?language=${isArabic ? 'ar' : 'en'}`);
+      const data = await response.json();
+      setQuestions(data.questions || []);
+    } catch (error) {
+      console.error('Error fetching common questions:', error);
+    }
+  };
+
+  const handleQuestionClick = (questionText: string) => {
+    onQuestionSelect(questionText);
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
+          theme === 'dark' 
+            ? 'bg-gray-700 text-white hover:bg-gray-600' 
+            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+        }`}
+      >
+        {isArabic ? 'الأسئلة الشائعة ▼' : 'Common Questions ▼'}
+      </button>
+      
+      {isOpen && (
+        <div className={`absolute bottom-full mb-2 left-0 w-80 rounded-lg shadow-lg border z-10 ${
+          theme === 'dark' 
+            ? 'bg-gray-800 border-gray-600' 
+            : 'bg-white border-gray-200'
+        }`}>
+          <div className="p-2">
+            <p className={`text-xs font-medium mb-2 ${
+              theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+            }`}>
+              {isArabic ? 'اختر سؤالاً شائعاً:' : 'Select a common question:'}
+            </p>
+            {questions.map((question) => (
+              <button
+                key={question.id}
+                onClick={() => handleQuestionClick(question.text)}
+                className={`w-full text-left p-2 text-sm rounded hover:transition-colors duration-200 ${
+                  theme === 'dark' 
+                    ? 'hover:bg-gray-700 text-white' 
+                    : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                {question.text}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ChatBox Component with vacation query support
 function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
   const [isTyping, setIsTyping] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ [key: number]: 'up' | 'down' | null }>({});
   const [mounted, setMounted] = useState(false);
+  const [sessionId] = useState(() => generateSessionId());
 
   // Fix hydration issue
   useEffect(() => {
@@ -97,26 +183,28 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
     }
   }, [resetTrigger, isArabic, mounted]);
 
-  const sendMessage = async (): Promise<void> => {
-    if (input.trim() === '') return;
+  const sendMessage = async (messageText?: string, isCommonQuestion: boolean = false): Promise<void> => {
+    const textToSend = messageText || input.trim();
+    if (textToSend === '') return;
 
     const userMsg: Message = {
       sender: 'user',
-      text: input,
+      text: textToSend,
       timestamp: formatTime(new Date())
     };
 
     setMessages((prev) => [...prev, userMsg]);
-    setInput('');
+    if (!messageText) setInput('');
     setIsTyping(true);
 
     try {
-      const { text: replyText, questionId } = await botReply(userMsg.text, isArabic);
+      const { text: replyText, questionId, status } = await botReply(textToSend, isArabic, sessionId, isCommonQuestion);
       const reply: Message = {
         sender: 'bot',
         text: replyText,
         timestamp: formatTime(new Date()),
-        questionId: questionId
+        questionId: questionId,
+        status: status
       };
       setMessages((prev) => [...prev, reply]);
     } catch (error) {
@@ -138,20 +226,24 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
     }
   };
 
-  const handleFeedback = async (messageIndex: number, feedbackType: 'up' | 'down') => {
-    const currentFeedback = feedback[messageIndex];
+  const handleCommonQuestionSelect = (question: string) => {
+    sendMessage(question, true);  // Pass true for isCommonQuestion
+  };
+
+  // Update the handleFeedback function to use the correct parameter type
+  const handleFeedback = async (questionId: number, feedbackType: 'up' | 'down') => {
+    const currentFeedback = feedback[questionId];
     const newFeedback = currentFeedback === feedbackType ? null : feedbackType;
     
     setFeedback(prev => ({
       ...prev,
-      [messageIndex]: newFeedback
+      [questionId]: newFeedback
     }));
 
-    const message = messages[messageIndex];
-    console.log(`Feedback for message: "${message.text.substring(0, 50)}..." - ${newFeedback || 'removed'}`);
+    console.log(`Feedback for question ID ${questionId} - ${newFeedback || 'removed'}`);
     
     // Send feedback to database if questionId exists
-    if (message.questionId && newFeedback !== null) {
+    if (questionId && newFeedback !== null) {
       try {
         await fetch('http://localhost:5000/feedback', {
           method: 'POST',
@@ -159,7 +251,7 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            question_id: message.questionId,
+            question_id: questionId,
             is_good: newFeedback === 'up'
           }),
         });
@@ -195,7 +287,6 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
 
   const { theme } = useTheme();
 
-  // Don't render until mounted to prevent hydration mismatch
   if (!mounted) {
     return (
       <div className="flex flex-col h-full justify-center items-center">
@@ -208,94 +299,104 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
     <div className="flex flex-col h-full justify-between p-4">
       {/* Chat messages */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-      {messages.map((msg, index) => (
-        msg.sender === 'system' ? (
-          <div key={index} className="flex justify-center my-4">
-            <div className={`text-sm italic
-                      ${theme === 'dark' ? 'text-white' : 'text-gray-600'}`}>
-              ──────────────────────────────────────── {msg.text} ────────────────────────────────────────
-            </div>
-          </div>
-        ) : (
-          <div key={index} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-            <div
-              className={`max-w-[70%] px-4 py-2 rounded-2xl shadow 
-              ${msg.sender === 'user' ? 'bg-[#4f3795] text-white' : 'bg-[#3ec1c7] text-white'}`}>
-              <p>{msg.text}</p>
-            </div>
-            
-            {/* Feedback buttons for bot messages only */}
-            {msg.sender === 'bot' && index > 1 && (
-              <div className="flex items-center gap-2 mt-2 px-2">
-                <button
-                  onClick={() => handleFeedback(index, 'up')}
-                  className={`p-1 rounded-full transition-colors duration-200 ${
-                    feedback[index] === 'up' 
-                      ? 'bg-green-500 text-white' 
-                      : 'bg-gray-200 text-gray-600 hover:bg-green-200 hover:text-green-600'
-                  }`}
-                  title={isArabic ? 'مفيد' : 'Helpful'}
-                >
-                  <FontAwesomeIcon icon={faThumbsUp} className="text-sm" />
-                </button>
-                
-                <button
-                  onClick={() => handleFeedback(index, 'down')}
-                  className={`p-1 rounded-full transition-colors duration-200 ${
-                    feedback[index] === 'down' 
-                      ? 'bg-red-500 text-white' 
-                      : 'bg-gray-200 text-gray-600 hover:bg-red-200 hover:text-red-600'
-                  }`}
-                  title={isArabic ? 'غير مفيد' : 'Not helpful'}
-                >
-                  <FontAwesomeIcon icon={faThumbsDown} className="text-sm" />
-                </button>
-                
-                {feedback[index] && (
-                  <span className={`text-xs ml-2 ${theme === 'dark' ? 'text-white' : 'text-gray-600'}`}>
-                    {isArabic 
-                      ? (feedback[index] === 'up' ? 'شكراً لتقييمك!' : 'شكراً للملاحظة!')
-                      : (feedback[index] === 'up' ? 'Thanks for your feedback!' : 'Thanks for the feedback!')
-                    }
-                  </span>
-                )}
+        {messages.map((msg, index) => (
+          msg.sender === 'system' ? (
+            <div key={index} className="flex justify-center my-4">
+              <div className={`text-sm italic
+                        ${theme === 'dark' ? 'text-white' : 'text-gray-600'}`}>
+                ──────────────────────────────────────── {msg.text} ────────────────────────────────────────
               </div>
-            )}
-            
-            <p className={`text-xs mt-1 px-2
-                      ${theme === 'dark' ? 'text-white' : 'text-gray-600'}`}>
-              {msg.timestamp}
-            </p>
-          </div>
-        )
-      ))}
+            </div>
+          ) : (
+            <div key={index} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+              <div
+                className={`max-w-[70%] px-4 py-2 rounded-2xl shadow 
+                ${msg.sender === 'user' ? 'bg-[#4f3795] text-white' : 'bg-[#3ec1c7] text-white'}`}>
+                <p>{msg.text}</p>
+              </div>
+              
+              {/* Feedback buttons for bot messages only (except vacation queries) */}
+              {msg.sender === 'bot' && (
+                <div className="flex items-center justify-between mt-2">
+                  <div className="flex items-center space-x-2">
+                    {/* Only show feedback buttons if there's a question_id (model responses) */}
+                    {msg.questionId && (
+                      <>
+                        <button
+                          onClick={() => handleFeedback(msg.questionId!, 'up')}  // Changed from true to 'up'
+                          className={`p-1 rounded transition-colors duration-200 ${
+                            theme === 'dark' 
+                              ? 'hover:bg-gray-600 text-gray-300 hover:text-green-400' 
+                              : 'hover:bg-gray-200 text-gray-600 hover:text-green-600'
+                          }`}
+                          title={isArabic ? 'مفيد' : 'Helpful'}
+                        >
+                          👍
+                        </button>
+                        <button
+                          onClick={() => handleFeedback(msg.questionId!, 'down')}  // Changed from false to 'down'
+                          className={`p-1 rounded transition-colors duration-200 ${
+                            theme === 'dark' 
+                              ? 'hover:bg-gray-600 text-gray-300 hover:text-red-400' 
+                              : 'hover:bg-gray-200 text-gray-600 hover:text-red-600'
+                          }`}
+                          title={isArabic ? 'غير مفيد' : 'Not helpful'}
+                        >
+                          👎
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  
+                  {/* Show timestamp */}
+                  <span className={`text-xs ${
+                    theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+                  }`}>
+                    {msg.timestamp}
+                  </span>
+                </div>
+              )}
+            </div>
+          )
+        ))}
 
         {isTyping && (
           <div className="flex justify-start">
-            <div className="main text-gray-200 px-4 py-2 rounded-2xl max-w-[70%] italic">
+            <div className="bg-[#3ec1c7] text-white px-4 py-2 rounded-2xl max-w-[70%] italic">
               {isArabic ? 'جاري البحث في قوانين العمل المصرية...' : 'Searching Egyptian labor laws...'}
             </div>
           </div>
         )}
       </div>
 
-      {/* Input */}
-      <div className={`mt-4 flex items-center rounded-full  p-2
-                      ${theme === 'dark' ? 'bg-[#4f3795] text-white' : 'bg-[#3ec1c7] text-white'}`}>
-        <FontAwesomeIcon className="ml-3 text-white" icon={faMagnifyingGlass}/>
-        <input
-          type="text"
-          placeholder={isArabic ? "اسأل عن قوانين العمل المصرية..." : "Ask about Egyptian labor laws..."}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          className="flex-1 focus:outline-none focus:ring-0 rounded-full px-4  py-1.5 text-white placeholder-white/70" 
-        />
+      {/* Input with Common Questions Dropdown */}
+      <div className="mt-4 space-y-2">
+        {/* Common Questions Dropdown */}
+        <div className="flex justify-start">
+          <CommonQuestionsDropdown 
+            isArabic={isArabic} 
+            onQuestionSelect={handleCommonQuestionSelect}
+          />
+        </div>
+        
+        {/* Input */}
+        <div className={`flex items-center rounded-full p-2
+                        ${theme === 'dark' ? 'bg-[#4f3795] text-white' : 'bg-[#3ec1c7] text-white'}`}>
+          <FontAwesomeIcon className="ml-3 text-white" icon={faMagnifyingGlass}/>
+          <input
+            type="text"
+            placeholder={isArabic ? "اسأل عن قوانين العمل المصرية..." : "Ask about Egyptian labor laws..."}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="flex-1 focus:outline-none focus:ring-0 rounded-full px-4 py-1.5 text-white placeholder-white/70" 
+          />
 
-        <button onClick={sendMessage} className={`ml-3 bg-white px-4 py-2 rounded-full transition 
-                         ${theme === 'dark' ? 'text-[#4f3795] hover:bg-[#3ec1c7] hover:text-white' : 'text-[#3ec1c7] hover:bg-[#4f3795] hover:text-white '}`}>
-          <FontAwesomeIcon icon={faPaperPlane}/>
-        </button>
+          <button onClick={() => sendMessage()} className={`ml-3 bg-white px-4 py-2 rounded-full transition 
+                           ${theme === 'dark' ? 'text-[#4f3795] hover:bg-[#3ec1c7] hover:text-white' : 'text-[#3ec1c7] hover:bg-[#4f3795] hover:text-white '}`}>
+            <FontAwesomeIcon icon={faPaperPlane}/>
+          </button>
+        </div>
       </div>
     </div>
   );
