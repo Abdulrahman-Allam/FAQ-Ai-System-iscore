@@ -925,7 +925,7 @@ Please coordinate with both parties to approve the transfer.'''
 
 لتقديم طلب الاستقالة، يرجى التوجه إلى رئيس قسمك:
 
-👤 رئيس قسم {employee_data["current_department_name"]}: {employee_data["current_department_head"]}
+رئيس قسم {employee_data["current_department_name"]}: {employee_data["current_department_head"]}
 
 سيقوم رئيس القسم بإرشادك خلال إجراءات الاستقالة الرسمية والوثائق المطلوبة.
 
@@ -935,7 +935,7 @@ Please coordinate with both parties to approve the transfer.'''
 
 To submit your resignation request, please contact your department head:
 
-👤 {employee_data["current_department_name"]} Department Head: {employee_data["current_department_head"]}
+{employee_data["current_department_name"]} Department Head: {employee_data["current_department_head"]}
 
 Your department head will guide you through the formal resignation procedures and required documentation.
 

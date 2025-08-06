@@ -165,6 +165,7 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
   const [input, setInput] = useState<string>('');
   const [isTyping, setIsTyping] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ [key: number]: 'up' | 'down' | null }>({});
+  const [feedbackMessage, setFeedbackMessage] = useState<{ [key: number]: string }>({});
   const [mounted, setMounted] = useState(false);
   const [sessionId] = useState(() => generateSessionId());
 
@@ -254,9 +255,40 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
         });
         
         console.log(`Feedback sent to database: ${newFeedback === 'up' ? 'positive' : 'negative'}`);
+        
+        // Show feedback message - PERSISTENT (no timeout removal)
+        const thankYouMessage = isArabic ? 'شكراً لك على تقييمك!' : 'Thanks for your feedback!';
+        setFeedbackMessage(prev => ({
+          ...prev,
+          [questionId]: thankYouMessage
+        }));
+        
       } catch (error) {
         console.error('Error sending feedback:', error);
+        const errorMessage = isArabic ? 'خطأ في إرسال التقييم' : 'Error sending feedback';
+        setFeedbackMessage(prev => ({
+          ...prev,
+          [questionId]: errorMessage
+        }));
+        
+        // Clear error message after 3 seconds (keep error timeout)
+        setTimeout(() => {
+          setFeedbackMessage(prev => {
+            const newState = { ...prev };
+            if (newState[questionId] === errorMessage) {
+              delete newState[questionId];
+            }
+            return newState;
+          });
+        }, 3000);
       }
+    } else if (newFeedback === null) {
+      // Only clear feedback message when feedback is completely removed (clicked same button twice)
+      setFeedbackMessage(prev => {
+        const newState = { ...prev };
+        delete newState[questionId];
+        return newState;
+      });
     }
   };
 
@@ -285,6 +317,7 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
     ]);
     
     setFeedback({});
+    setFeedbackMessage({});
   };
 
   const { theme } = useTheme();
@@ -312,9 +345,10 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
           ) : (
             <div key={index} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
               <div
-                className={`max-w-[70%] px-4 py-2 rounded-2xl shadow 
-                ${msg.sender === 'user' ? 'bg-[#4f3795] text-white' : 'bg-[#3ec1c7] text-white'}`}>
-                <p>{msg.text}</p>
+                className={`max-w-[70%] px-4 py-2 rounded-2xl shadow ${
+                  msg.sender === 'user' ? 'bg-[#4f3795] text-white' : 'bg-[#3ec1c7] text-white'
+                } ${isArabic ? 'rtl arabic-text' : 'ltr'}`}>
+                <p className={isArabic ? 'text-right' : 'text-left'}>{msg.text}</p>
               </div>
               
               {/* Feedback buttons for bot messages only (except vacation queries) */}
@@ -327,9 +361,11 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
                         <button
                           onClick={() => handleFeedback(msg.questionId!, 'up')}  // Changed from true to 'up'
                           className={`p-1 rounded transition-colors duration-200 ${
-                            theme === 'dark' 
-                              ? 'hover:bg-gray-600 text-gray-300 hover:text-green-400' 
-                              : 'hover:bg-gray-200 text-gray-600 hover:text-green-600'
+                            feedback[msg.questionId!] === 'up'
+                              ? 'bg-green-500 text-white'
+                              : theme === 'dark' 
+                                ? 'hover:bg-gray-600 text-gray-300 hover:text-green-400' 
+                                : 'hover:bg-gray-200 text-gray-600 hover:text-green-600'
                           }`}
                           title={isArabic ? 'مفيد' : 'Helpful'}
                         >
@@ -338,14 +374,25 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
                         <button
                           onClick={() => handleFeedback(msg.questionId!, 'down')}  // Changed from false to 'down'
                           className={`p-1 rounded transition-colors duration-200 ${
-                            theme === 'dark' 
-                              ? 'hover:bg-gray-600 text-gray-300 hover:text-red-400' 
-                              : 'hover:bg-gray-200 text-gray-600 hover:text-red-600'
+                            feedback[msg.questionId!] === 'down'
+                              ? 'bg-red-500 text-white'
+                              : theme === 'dark' 
+                                ? 'hover:bg-gray-600 text-gray-300 hover:text-red-400' 
+                                : 'hover:bg-gray-200 text-gray-600 hover:text-red-600'
                           }`}
                           title={isArabic ? 'غير مفيد' : 'Not helpful'}
                         >
                           👎
                         </button>
+                        
+                        {/* Show feedback message */}
+                        {feedbackMessage[msg.questionId!] && (
+                          <span className={`text-xs italic ml-2 ${
+                            theme === 'dark' ? 'text-green-400' : 'text-green-600'
+                          }`}>
+                            {feedbackMessage[msg.questionId!]}
+                          </span>
+                        )}
                       </>
                     )}
                   </div>
@@ -364,8 +411,9 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
 
         {isTyping && (
           <div className="flex justify-start">
-            <div className={`main text-gray-200 px-4 py-2 rounded-2xl max-w-[70%] italic 
-              ${isArabic ? 'text-right' : 'text-left'}`}>
+            <div className={`main text-gray-200 px-4 py-2 rounded-2xl max-w-[70%] italic ${
+              isArabic ? 'text-right rtl arabic-text' : 'text-left ltr'
+            }`}>
               {isArabic ? 'جاري البحث، أرجو الانتظار' : 'Searching, Please Wait'}
             </div>
           </div>
@@ -392,7 +440,9 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            className={`flex-1 focus:outline-none focus:ring-0 rounded-full px-4 py-1.5 text-white placeholder-white/70 ${isArabic ? 'text-right' : 'text-left'}`}
+            className={`flex-1 focus:outline-none focus:ring-0 rounded-full px-4 py-1.5 text-white placeholder-white/70 ${
+              isArabic ? 'text-right rtl arabic-text' : 'text-left ltr'
+            }`}
           />
 
           <button onClick={() => sendMessage()} className={`ml-3 bg-white px-4 py-2 rounded-full transition 
