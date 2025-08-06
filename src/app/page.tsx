@@ -85,7 +85,7 @@ export default function Home() {
         </div>
       ) : (
         // English Layout: Content on left, robot on right
-        <div className='flex gap-40 justify-between items-center h-full'>
+        <div className='flex gap-40 justify-evenly items-center h-full'>
           <div className='flex flex-col space-y-14 flex-1 pl-10'> {/* Added pl-10 for consistent spacing */}
             <div className='flex items-center'>
               <FontAwesomeIcon bounce className='text-6xl mr-4 text-[#3ec1c7]' icon={faComment}/>
@@ -116,7 +116,7 @@ export default function Home() {
           </div>
           
           <div className='bg-transparent flex-shrink-0'>
-            <Image src={bot} alt="iScore" className='' width={400}/>
+            <Image src={bot} alt="iscore"  width={400}/>
           </div>
         </div>
       )}

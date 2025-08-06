@@ -125,39 +125,36 @@ function CommonQuestionsDropdown({ isArabic, onQuestionSelect }: {
           theme === 'dark' 
             ? 'bg-gray-700 text-white hover:bg-gray-600' 
             : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-        }`}
-      >
+        }`}>
         {isArabic ? 'الأسئلة الشائعة ▼' : 'Common Questions ▼'}
       </button>
-      
+
       {isOpen && (
-        <div className={`absolute bottom-full mb-2 left-0 w-80 rounded-lg shadow-lg border z-10 ${
-          theme === 'dark' 
-            ? 'bg-gray-800 border-gray-600' 
-            : 'bg-white border-gray-200'
-        }`}>
+        <div className={`absolute bottom-full mb-2 w-85 rounded-lg shadow-lg border z-10 
+          ${theme === 'dark' ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}
+          ${isArabic ? 'right-0.5' : 'left-0.5'}
+          `}>
           <div className="p-2">
-            <p className={`text-xs font-medium mb-2 ${
-              theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
+            <p className={`text-s font-medium mb-2 text-center pb-2 border-b-2  ${
+              theme === 'dark' ? 'text-gray-300 border-b-gray-600' : 'text-gray-600 border-b-gray-200'
             }`}>
-              {isArabic ? 'اختر سؤالاً شائعاً:' : 'Select a common question:'}
+              {isArabic ? 'اختر سؤالاً شائعاً' : 'Select a common question'}
             </p>
             {questions.map((question) => (
               <button
                 key={question.id}
                 onClick={() => handleQuestionClick(question.text)}
-                className={`w-full text-left p-2 text-sm rounded hover:transition-colors duration-200 ${
-                  theme === 'dark' 
-                    ? 'hover:bg-gray-700 text-white' 
-                    : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
+                className={`w-full p-2 text-sm rounded hover:transition-colors duration-200 
+                  ${theme === 'dark' ? 'hover:bg-gray-700 text-white' : 'hover:bg-gray-100 text-gray-700'}
+                  ${isArabic ? 'text-right' : 'text-left'}
+                `}>
                 {question.text}
               </button>
             ))}
           </div>
         </div>
       )}
+
     </div>
   );
 }
@@ -267,17 +264,22 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
     if (!mounted) return;
     
     const now = new Date();
-    const today = isArabic ? 'اليوم' : 'Today';
+    const formattedDate = now.toLocaleDateString(undefined, {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
   
     setMessages([
       {
         sender: 'system',
-        text: today,
+        text: `${formattedDate}`,
         timestamp: formatTime(now)
       },
       {
         sender: 'bot',
-        text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك في قوانين العمل المصرية؟' : 'Hello! How can I help you with Egyptian labor laws?',
+        text: isArabic ? 'مرحباً! كيف يمكنني مساعدتك؟' : 'Hello! How can I help you?',
         timestamp: formatTime(new Date())
       }
     ]);
@@ -304,7 +306,7 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
             <div key={index} className="flex justify-center my-4">
               <div className={`text-sm italic
                         ${theme === 'dark' ? 'text-white' : 'text-gray-600'}`}>
-                ──────────────────────────────────────── {msg.text} ────────────────────────────────────────
+                ───────────── {msg.text} ─────────────
               </div>
             </div>
           ) : (
@@ -362,8 +364,9 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
 
         {isTyping && (
           <div className="flex justify-start">
-            <div className="bg-[#3ec1c7] text-white px-4 py-2 rounded-2xl max-w-[70%] italic">
-              {isArabic ? 'جاري البحث في قوانين العمل المصرية...' : 'Searching Egyptian labor laws...'}
+            <div className={`main text-gray-200 px-4 py-2 rounded-2xl max-w-[70%] italic 
+              ${isArabic ? 'text-right' : 'text-left'}`}>
+              {isArabic ? 'جاري البحث، أرجو الانتظار' : 'Searching, Please Wait'}
             </div>
           </div>
         )}
@@ -372,7 +375,7 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
       {/* Input with Common Questions Dropdown */}
       <div className="mt-4 space-y-2">
         {/* Common Questions Dropdown */}
-        <div className="flex justify-start">
+        <div className={`flex ${isArabic ? 'justify-end' : 'justify-start'}`}>
           <CommonQuestionsDropdown 
             isArabic={isArabic} 
             onQuestionSelect={handleCommonQuestionSelect}
@@ -385,11 +388,11 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
           <FontAwesomeIcon className="ml-3 text-white" icon={faMagnifyingGlass}/>
           <input
             type="text"
-            placeholder={isArabic ? "اسأل عن قوانين العمل المصرية..." : "Ask about Egyptian labor laws..."}
+            placeholder={isArabic ? "ما هو استفسارك" : "Ask About Anything..."}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 focus:outline-none focus:ring-0 rounded-full px-4 py-1.5 text-white placeholder-white/70" 
+            className={`flex-1 focus:outline-none focus:ring-0 rounded-full px-4 py-1.5 text-white placeholder-white/70 ${isArabic ? 'text-right' : 'text-left'}`}
           />
 
           <button onClick={() => sendMessage()} className={`ml-3 bg-white px-4 py-2 rounded-full transition 
@@ -455,7 +458,8 @@ export default function Home() {
             <button type='button' className={`text-2xl ${theme === 'dark' ? 'iconsDARK' : 'icons'}`} onClick={() => router.push('/')}><FontAwesomeIcon icon={faHouse} /></button>
             <button type='button' className={`text-2xl ${theme === 'dark' ? 'iconsDARK' : 'icons'}`} onClick={handleReset}><FontAwesomeIcon icon={faPlus}/></button>
           </div>
-          <div className='middle w-[30%] flex items-center justify-center gap-5'>
+          <div className={`middle w-[30%] flex items-center justify-center gap-5
+                        ${isArabic ? 'flex-row-reverse' : 'flex-row'}`}>
             <p className='font-bold text-white text-3xl'>{isArabic ? 'تحدث مع' : 'Chat With'}</p>
             <Image src={iscore} alt="iScore" width={150} />
           </div>
