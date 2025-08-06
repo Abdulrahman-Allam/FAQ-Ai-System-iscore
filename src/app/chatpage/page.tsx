@@ -348,7 +348,11 @@ function ChatBox({ resetTrigger, isArabic, setIsArabic }: ChatBoxProps) {
                 className={`max-w-[70%] px-4 py-2 rounded-2xl shadow ${
                   msg.sender === 'user' ? 'bg-[#4f3795] text-white' : 'bg-[#3ec1c7] text-white'
                 } ${isArabic ? 'rtl arabic-text' : 'ltr'}`}>
-                <p className={isArabic ? 'text-right' : 'text-left'}>{msg.text}</p>
+                <p 
+                  className={`${isArabic ? 'text-right' : 'text-left'} whitespace-pre-line`}
+                >
+                  {msg.text}
+                </p>
               </div>
               
               {/* Feedback buttons for bot messages only (except vacation queries) */}

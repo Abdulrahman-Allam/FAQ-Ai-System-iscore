@@ -567,7 +567,7 @@ def ask_question():
                 # Get all departments for user reference
                 departments = get_all_departments()
                 
-                # Format departments list nicely with better spacing
+                # Format departments list with proper line breaks
                 if user_language == 'ar':
                     dept_list_formatted = "\n".join([f"• {dept}" for dept in departments])
                     dept_request_message = f'''إلى أي قسم تريد الانتقال؟
@@ -822,7 +822,7 @@ Please choose the department name exactly as written above.
                     
                     # Valid request - provide contact information
                     contact_message_ar = f'''مرحباً {employee_data["employee_name"]}،
-            
+
 للانتقال من قسم {employee_data["current_department_name"]} إلى قسم {target_department["department_name"]}، تحتاج للتواصل مع:
 
 1. رئيس قسمك الحالي: {employee_data["current_department_head"]}
@@ -925,7 +925,7 @@ Please coordinate with both parties to approve the transfer.'''
 
 لتقديم طلب الاستقالة، يرجى التوجه إلى رئيس قسمك:
 
-رئيس قسم {employee_data["current_department_name"]}: {employee_data["current_department_head"]}
+ رئيس قسم {employee_data["current_department_name"]}: {employee_data["current_department_head"]}
 
 سيقوم رئيس القسم بإرشادك خلال إجراءات الاستقالة الرسمية والوثائق المطلوبة.
 
@@ -935,7 +935,7 @@ Please coordinate with both parties to approve the transfer.'''
 
 To submit your resignation request, please contact your department head:
 
-{employee_data["current_department_name"]} Department Head: {employee_data["current_department_head"]}
+ {employee_data["current_department_name"]} Department Head: {employee_data["current_department_head"]}
 
 Your department head will guide you through the formal resignation procedures and required documentation.
 

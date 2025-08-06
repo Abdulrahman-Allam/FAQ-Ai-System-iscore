@@ -1099,6 +1099,10 @@
     font-weight: var(--font-weight-medium);
   }
 
+  .whitespace-pre-line {
+    white-space: pre-line;
+  }
+
   .text-\[\#3ec1c7\] {
     color: #3ec1c7;
   }
