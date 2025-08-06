@@ -156,7 +156,10 @@
   @supports (color: lab(0% 0 0)) {
     :root, :host {
       --color-red-400: lab(63.7053% 60.7449 31.3109);
+<<<<<<< HEAD
+=======
       --color-red-500: lab(55.4814% 75.0732 48.8528);
+>>>>>>> 5e8d391c58586986c5696d220871c006f78903e7
       --color-red-600: lab(48.4493% 77.4328 61.5452);
       --color-green-400: lab(78.503% -64.9265 39.7492);
       --color-green-500: lab(70.5521% -66.5147 45.8072);
@@ -587,10 +590,6 @@
 
   .flex {
     display: flex;
-  }
-
-  .table {
-    display: table;
   }
 
   .h-\[10\%\] {
