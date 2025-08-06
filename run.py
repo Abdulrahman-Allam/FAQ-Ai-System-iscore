@@ -598,7 +598,7 @@ Please type the department name exactly as written above.
                     "question_id": None,  # No question ID for auto responses
                     "status": "department_query",
                     "session_id": session_id
-                }, 200)
+                }), 200
             
             elif is_resignation_dropdown:
                 # Resignation query logic - NO DATABASE STORAGE

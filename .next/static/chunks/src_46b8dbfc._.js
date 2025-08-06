@@ -143,7 +143,7 @@ function CommonQuestionsDropdown(param) {
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("button", {
                 onClick: ()=>setIsOpen(!isOpen),
                 className: "px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ".concat(theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'),
-                children: isArabic ? 'الأسئلة الشائعة ▼' : 'Common Questions ▼'
+                children: isArabic ? 'الأسئلة الموظفين ▼' : 'Employee Specific Questions ▼'
             }, void 0, false, {
                 fileName: "[project]/src/app/chatpage/page.tsx",
                 lineNumber: 122,
@@ -156,7 +156,7 @@ function CommonQuestionsDropdown(param) {
                     children: [
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
                             className: "text-s font-medium mb-2 text-center pb-2 border-b-2  ".concat(theme === 'dark' ? 'text-gray-300 border-b-gray-600' : 'text-gray-600 border-b-gray-200'),
-                            children: isArabic ? 'اختر سؤالاً شائعاً' : 'Select a common question'
+                            children: isArabic ? 'اختر سؤال' : 'Select a question'
                         }, void 0, false, {
                             fileName: "[project]/src/app/chatpage/page.tsx",
                             lineNumber: 138,
