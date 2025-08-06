@@ -126,7 +126,7 @@ function CommonQuestionsDropdown({ isArabic, onQuestionSelect }: {
             ? 'bg-gray-700 text-white hover:bg-gray-600' 
             : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
         }`}>
-        {isArabic ? 'الأسئلة الشائعة ▼' : 'Common Questions ▼'}
+        {isArabic ? 'الأسئلة الموظفين ▼' : 'Employee Specific Questions ▼'}
       </button>
 
       {isOpen && (
@@ -138,7 +138,7 @@ function CommonQuestionsDropdown({ isArabic, onQuestionSelect }: {
             <p className={`text-s font-medium mb-2 text-center pb-2 border-b-2  ${
               theme === 'dark' ? 'text-gray-300 border-b-gray-600' : 'text-gray-600 border-b-gray-200'
             }`}>
-              {isArabic ? 'اختر سؤالاً شائعاً' : 'Select a common question'}
+              {isArabic ? 'اختر سؤال' : 'Select a question'}
             </p>
             {questions.map((question) => (
               <button
