@@ -11,76 +11,123 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime
 import os
 import math
+import numpy as np
+from sentence_transformers import SentenceTransformer
+import logging
+from dotenv import load_dotenv
+from functools import wraps
+
+# Load environment variables
+load_dotenv()
 
 # Initialize translator
 translator_ar = GoogleTranslator(source='en', target='ar')
 translator_en = GoogleTranslator(source='ar', target='en')
 
-# Database setup
-DATABASE_URL = "postgresql://postgres.miqxqndvjliyelaceqip:FAQwhat?1234@aws-0-eu-north-1.pooler.supabase.com:5432/postgres"
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+# Alternative DB config from environment variables
+DB_CONFIG = {
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'database': os.getenv('DB_NAME', 'faq_db'),
+    'user': os.getenv('DB_USER', 'postgres'),
+    'password': os.getenv('DB_PASSWORD', 'password'),
+    'port': os.getenv('DB_PORT', '5432')
+}
+
+# Admin API Key
+ADMIN_API_KEY = os.getenv('ADMIN_API_KEY', 'your-secret-admin-key-here')
+
+# Initialize the sentence transformer model for vector similarity
+model = SentenceTransformer('all-MiniLM-L6-v2')  # 384 dimensions
+
+def require_admin_api_key(f):
+    """Decorator to require API key for admin endpoints"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check for API key in X-API-Key header
+        api_key = request.headers.get('x-api-key')
+        
+        if not api_key:
+            return jsonify({
+                "error": "API key is required", 
+                "message": "Please provide an API key in the 'X-API-Key' header"
+            }), 401
+        
+        if api_key != ADMIN_API_KEY:
+            return jsonify({
+                "error": "Invalid API key", 
+                "message": "The provided API key is not valid"
+            }), 403
+        
+        return f(*args, **kwargs)
+    return decorated_function
 
 def get_db_connection():
-    """Get database connection"""
+    """Get database connection with fallback to environment config"""
     try:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-        return conn
+        # Try direct URL first
+            # Fallback to environment config
+            conn = psycopg2.connect(**DB_CONFIG)
+            return conn
     except Exception as e:
+        logger.error(f"Database connection error: {e}")
         print(f"Database connection error: {e}")
         return None
 
-def init_database():
-    """Initialize the database with required tables (only if they don't exist)"""
+
+def calculate_similarity_threshold(embedding, top_k=3):
+    """Calculate similarity scores using vector embeddings"""
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
-        if not conn:
-            print("Failed to connect to database")
-            return
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Convert embedding to PostgreSQL vector format
+            embedding_str = '[' + ','.join(map(str, embedding)) + ']'
             
-        cursor = conn.cursor()
-        
-        # Create questions table ONLY if it doesn't exist
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS questions (
-                question_id BIGSERIAL PRIMARY KEY,
-                question_text TEXT NOT NULL,
-                answer_text TEXT,
-                status VARCHAR(20) DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Create feedback table ONLY if it doesn't exist
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS feedback (
-                feed_id BIGSERIAL PRIMARY KEY,
-                question_id BIGINT NOT NULL,
-                is_good BOOLEAN NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (question_id) REFERENCES questions (question_id) ON DELETE CASCADE
-            )
-        ''')
-        
-        # Check if tables exist and show counts
-        cursor.execute('SELECT COUNT(*) as count FROM questions')
-        questions_count = cursor.fetchone()['count']
-        
-        cursor.execute('SELECT COUNT(*) as count FROM feedback')
-        feedback_count = cursor.fetchone()['count']
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        print(f"✅ Database connection successful!")
-        print(f"📊 Existing questions: {questions_count}")
-        print(f"📊 Existing feedback: {feedback_count}")
-        print("🔄 Tables ready - preserving all existing data")
-        
+            # Find most similar questions using cosine similarity
+            cur.execute("""
+                SELECT q_id, q_text, answer_text, dep_id, status,
+                       1 - (q_embedding <=> %s::vector) as similarity
+                FROM questions 
+                WHERE status = 'answered' AND q_embedding IS NOT NULL
+                ORDER BY q_embedding <=> %s::vector
+                LIMIT %s
+            """, (embedding_str, embedding_str, top_k))
+            
+            results = cur.fetchall()
+            print(f"Found {len(results)} similar questions")
+            return results
     except Exception as e:
-        print(f"❌ Database initialization error: {e}")
+        logger.error(f"Vector similarity error: {e}")
+        print(f"Vector similarity error: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def log_interaction(question_id, department_id):
+    """Log user interactions for analytics"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO interaction_logs (q_id, dep_id)
+                VALUES (%s, %s)
+            """, (question_id, department_id))
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Error logging interaction: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
 
 def store_question(question_text, answer_text, status):
-    """Store question and answer in database with better error handling"""
+    """Store question and answer in database with vector embedding support"""
     conn = None
     cursor = None
     
@@ -92,17 +139,23 @@ def store_question(question_text, answer_text, status):
             
         cursor = conn.cursor()
         
-        # Insert new question (will auto-increment question_id)
+        # Generate embedding for the question
+        question_embedding = model.encode(question_text)
+        embedding_str = '[' + ','.join(map(str, question_embedding)) + ']'
+        
+        # Insert new question with vector embedding
         insert_query = '''
-            INSERT INTO questions (question_text, answer_text, status, created_at)
-            VALUES (%s, %s, %s, %s) 
-            RETURNING question_id
+            INSERT INTO questions (q_text, answer_text, status, created_at, q_embedding, updated_at)
+            VALUES (%s, %s, %s, %s, %s::vector, %s) 
+            RETURNING q_id
         '''
         
         cursor.execute(insert_query, (
             question_text, 
             answer_text, 
             status, 
+            datetime.now(),
+            embedding_str,
             datetime.now()
         ))
         
@@ -152,7 +205,7 @@ def store_feedback(question_id, is_good):
         cursor = conn.cursor()
         
         # Check if the question exists
-        cursor.execute('SELECT question_id FROM questions WHERE question_id = %s', (question_id,))
+        cursor.execute('SELECT q_id FROM questions WHERE q_id = %s', (question_id,))
         if not cursor.fetchone():
             print(f"❌ Question ID {question_id} does not exist")
             return False
@@ -197,8 +250,55 @@ def store_feedback(question_id, is_good):
             except:
                 pass
 
-# Initialize database on startup
-init_database()
+def insert_sample_data():
+    """Insert sample departments and employees for testing"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return
+            
+        cursor = conn.cursor()
+        
+        # Insert sample departments if they don't exist
+        departments = [
+            (1, "Human Resources", "Ahmed Hassan"),
+            (2, "Engineering", "Sarah Mohammed"),
+            (3, "Finance", "Omar Ali"),
+            (4, "Marketing", "Fatima Ibrahim"),
+            (5, "Operations", "Hassan Abdullah")
+        ]
+        
+        for dept_id, dept_name, dept_head in departments:
+            cursor.execute("""
+                INSERT INTO departments (department_id, department_name, department_head)
+                VALUES (%s, %s, %s) ON CONFLICT (department_id) DO NOTHING
+            """, (dept_id, dept_name, dept_head))
+        
+        # Insert sample employees if they don't exist
+        employees = [
+            (1001, "Ali Ahmed", 1, 25),
+            (1002, "Mona Hassan", 2, 20),
+            (1003, "Ahmed Omar", 3, 30),
+            (1004, "Layla Ibrahim", 4, 15),
+            (1005, "Khaled Abdullah", 5, 22)
+        ]
+        
+        for emp_id, name, dept_id, vacations in employees:
+            cursor.execute("""
+                INSERT INTO employees (employee_id, name, department_id, remaining_vacations)
+                VALUES (%s, %s, %s, %s) ON CONFLICT (employee_id) DO NOTHING
+            """, (emp_id, name, dept_id, vacations))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("✅ Sample data inserted successfully")
+        
+    except Exception as e:
+        print(f"❌ Error inserting sample data: {e}")
+
+# Insert sample data
+insert_sample_data()
 
 # Load Egyptian labor rules FAQ data
 faq_data = []
@@ -317,6 +417,286 @@ CORS(app)
 
 # Add a global state to track vacation query mode
 vacation_query_sessions = {}
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
+
+@app.route('/departments', methods=['GET'])
+def get_departments():
+    """Get all departments"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT department_id as dep_id, department_name as dept_name FROM departments")
+            departments = cur.fetchall()
+            return jsonify({"departments": departments})
+    except Exception as e:
+        logger.error(f"Error fetching departments: {e}")
+        return jsonify({"error": "Failed to fetch departments"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/admin/pending-questions', methods=['GET'])
+@require_admin_api_key
+def get_admin_pending_questions():
+    """Admin endpoint to get all pending questions with details"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT q.q_id as q_id, q.q_text as q_text, q.created_at, 
+                       d.dept_name as dept_name, q.dep_id
+                FROM questions q
+                LEFT JOIN departments d ON q.dep_id = d.department_id
+                WHERE q.status = 'pending'
+                ORDER BY q.created_at DESC
+            """)
+            
+            pending_questions = cur.fetchall()
+            
+            return jsonify({
+                "pending_questions": [
+                    {
+                        "id": q['q_id'],
+                        "question": q['q_text'],
+                        "department_id": q['dep_id'],
+                        "department_name": q['dept_name'],
+                        "submitted_at": q['created_at'].isoformat() if q['created_at'] else None
+                    } for q in pending_questions
+                ]
+            })
+            
+    except Exception as e:
+        logger.error(f"Error fetching pending questions: {e}")
+        return jsonify({"error": "Failed to fetch pending questions"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/admin/answer-question', methods=['PUT'])
+@require_admin_api_key
+def admin_answer_question():
+    """Admin endpoint to answer a specific pending question and assign department"""
+    try:
+        data = request.get_json()
+        
+        if not data or 'question_id' not in data or 'answer' not in data:
+            return jsonify({"error": "Question ID and answer are required"}), 400
+        
+        question_id = data['question_id']
+        answer = data['answer']
+        department_id = data.get('department_id')  # Optional - can assign department
+        
+        conn = get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Check if question exists and is pending
+                cur.execute("""
+                    SELECT q_id as q_id, q_text as q_text FROM questions 
+                    WHERE q_id = %s AND status = 'pending'
+                """, (question_id,))
+                
+                question = cur.fetchone()
+                if not question:
+                    return jsonify({"error": "Question not found or not pending"}), 404
+                
+                # Generate embedding for the answer if not exists
+                question_embedding = model.encode(question['q_text'])
+                embedding_str = '[' + ','.join(map(str, question_embedding)) + ']'
+                
+                # Update question with answer and optionally department
+                if department_id:
+                    cur.execute("""
+                        UPDATE questions 
+                        SET answer_text = %s, status = 'answered', dep_id = %s, 
+                            updated_at = CURRENT_TIMESTAMP, q_embedding = %s::vector
+                        WHERE q_id = %s
+                    """, (answer, department_id, embedding_str, question_id))
+                else:
+                    cur.execute("""
+                        UPDATE questions 
+                        SET answer_text = %s, status = 'answered', 
+                            updated_at = CURRENT_TIMESTAMP, q_embedding = %s::vector
+                        WHERE q_id = %s
+                    """, (answer, embedding_str, question_id))
+                
+                conn.commit()
+                
+                return jsonify({
+                    "status": "success",
+                    "message": "Question answered successfully",
+                    "question_id": question_id,
+                    "question": question['q_text'],
+                    "answer": answer
+                })
+                
+        except Exception as e:
+            logger.error(f"Error answering question: {e}")
+            conn.rollback()
+            return jsonify({"error": "Failed to answer question"}), 500
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"Error processing answer: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/questions/<int:question_id>', methods=['GET'])
+def get_question_details(question_id):
+    """Get details of a specific question"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT q.q_id, q.q_text, q.answer_text, q.status, 
+                       q.created_at, q.updated_at, d.department_name as dept_name
+                FROM questions q
+                LEFT JOIN departments d ON q.dep_id = d.department_id
+                WHERE q.q_id = %s
+            """, (question_id,))
+            
+            question = cur.fetchone()
+            
+            if not question:
+                return jsonify({"error": "Question not found"}), 404
+            
+            return jsonify({"question": dict(question)})
+            
+    except Exception as e:
+        logger.error(f"Error fetching question details: {e}")
+        return jsonify({"error": "Failed to fetch question details"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/questions/<int:question_id>/similar', methods=['GET'])
+def get_similar_questions(question_id):
+    """Get similar questions for a specific question"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # First get the target question's embedding
+            cur.execute("""
+                SELECT q_embedding FROM questions 
+                WHERE q_id = %s AND status = 'answered'
+            """, (question_id,))
+            
+            result = cur.fetchone()
+            if not result or not result['q_embedding']:
+                return jsonify({"error": "Question not found or no embedding available"}), 404
+            
+            # Find similar questions
+            cur.execute("""
+                SELECT q_id as q_id, q_text as q_text, answer_text, dep_id,
+                       1 - (q_embedding <=> %s) as similarity
+                FROM questions 
+                WHERE status = 'answered' AND q_id != %s AND q_embedding IS NOT NULL
+                ORDER BY q_embedding <=> %s
+                LIMIT 3
+            """, (result['q_embedding'], question_id, result['q_embedding']))
+            
+            similar_questions = cur.fetchall()
+            
+            return jsonify({
+                "similar_questions": [
+                    {
+                        "id": q['q_id'],
+                        "question": q['q_text'],
+                        "answer": q['answer_text'],
+                        "department_id": q['dep_id'],
+                        "similarity": round(q['similarity'], 3)
+                    } for q in similar_questions if q['similarity'] >= 0.5
+                ]
+            })
+            
+    except Exception as e:
+        logger.error(f"Error fetching similar questions: {e}")
+        return jsonify({"error": "Failed to fetch similar questions"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+@app.route('/submit-question', methods=['POST'])
+def submit_new_question():
+    """Endpoint for users to submit new questions"""
+    try:
+        data = request.get_json()
+        
+        if not data or 'question' not in data:
+            return jsonify({"error": "Question is required"}), 400
+        
+        question_text = data['question'].strip()
+        department_id = data.get('department_id')  # Optional
+        
+        if not question_text:
+            return jsonify({"error": "Question cannot be empty"}), 400
+        
+        conn = get_db_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Check if question already exists
+                cur.execute("""
+                    SELECT q_id as q_id, q_text as q_text, answer_text, status FROM questions 
+                    WHERE q_text = %s
+                """, (question_text,))
+                
+                existing_question = cur.fetchone()
+                
+                if existing_question:
+                    if existing_question['status'] == 'answered' and existing_question['answer_text']:
+                        # Question already exists and is answered
+                        return jsonify({
+                            "status": "existing_question",
+                            "message": "This question already exists in our database.",
+                            "question_id": existing_question['q_id'],
+                            "question": existing_question['q_text'],
+                            "answer": existing_question['answer_text']
+                        })
+                    elif existing_question['status'] == 'pending':
+                        # Question already exists but is pending
+                        return jsonify({
+                            "status": "pending_question",
+                            "message": "This question has already been submitted and is pending review.",
+                            "ticket_id": existing_question['q_id'],
+                            "question": existing_question['q_text']
+                        })
+                
+                # Generate embedding for the new question
+                question_embedding = model.encode(question_text)
+                embedding_str = '[' + ','.join(map(str, question_embedding)) + ']'
+                
+                # Insert new question with pending status
+                cur.execute("""
+                    INSERT INTO questions (q_text, dep_id, status, q_embedding, answer_text, created_at, updated_at)
+                    VALUES (%s, %s, 'pending', %s::vector, NULL, %s, %s)
+                    RETURNING q_id
+                """, (question_text, department_id, embedding_str, datetime.now(), datetime.now()))
+                
+                result = cur.fetchone()
+                ticket_id = result['question_id']
+                
+                conn.commit()
+                
+                return jsonify({
+                    "status": "success",
+                    "message": "Your question has been submitted successfully. You will be notified once answered.",
+                    "ticket_id": ticket_id,
+                    "question": question_text
+                })
+                
+        except Exception as e:
+            logger.error(f"Error saving new question: {e}")
+            conn.rollback()
+            return jsonify({"error": "Failed to save your question"}), 500
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"Error processing new question: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 def get_employee_vacation(employee_id):
     """Get employee vacation information from database"""
@@ -1045,108 +1425,178 @@ We wish you the best in your future career endeavors.'''
             if session_id in vacation_query_sessions and not any(key in vacation_query_sessions[session_id] for key in ['waiting_for_id', 'waiting_for_department', 'waiting_for_employee_id']):
                 del vacation_query_sessions[session_id]
             
-            print("Processing as regular FAQ question - sending to model (WILL BE SAVED)")
-            
             detected_lang = detect_language(original_question)
             print(f"Detected language: {detected_lang}")
             
+            # ENGLISH QUESTIONS: Use vector similarity search only
             if detected_lang == 'en' or user_language == 'en':
-                arabic_question = translate_text(original_question, 'ar')
-                print(f"Translated question to Arabic: {arabic_question}")
+                print("English question detected - using vector similarity search (NO translation)")
+                
+                try:
+                    # Use original English question for vector search
+                    question_embedding = model.encode(original_question)
+                    similar_questions = calculate_similarity_threshold(question_embedding, top_k=3)
+                    
+                    if similar_questions:
+                        best_match = similar_questions[0]
+                        similarity_threshold = 0.7
+                        
+                        print(f"Vector similarity - Best match score: {best_match.get('similarity', 0)}")
+                        
+                        if best_match.get('similarity', 0) >= similarity_threshold:
+                            # Found a good match in existing questions
+                            matched_question = best_match
+                            
+                            # Log the interaction
+                            log_interaction(matched_question['q_id'], data.get('department_id'))
+                            
+                            # Get similar questions (excluding the matched one)
+                            similar_suggestions = [q for q in similar_questions[1:3] if q.get('similarity', 0) >= 0.5]
+                            
+                            print(f"Vector similarity match found - using existing answer (not saved again)")
+                            
+                            # Format response to match frontend expectations (answers array)
+                            return jsonify({
+                                "answers": [matched_question['answer_text']],
+                                "confidence_scores": [matched_question['similarity']],
+                                "question_id": matched_question['q_id'],
+                                "status": "answered",
+                                "session_id": session_id,
+                                "matched_question": {
+                                    "id": matched_question['q_id'],
+                                    "question": matched_question['q_text'],
+                                    "answer": matched_question['answer_text'],
+                                    "department_id": matched_question.get('dep_id'),
+                                    "similarity": round(matched_question['similarity'], 3)
+                                },
+                                "similar_questions": [
+                                    {
+                                        "id": q['q_id'],
+                                        "question": q['q_text'],
+                                        "similarity": round(q['similarity'], 3)
+                                    } for q in similar_suggestions
+                                ]
+                            }), 200
+                    
+                    # No good vector match for English question - save as pending
+                    print("No vector similarity match for English question - saving as pending")
+                    question_id = store_question(
+                        original_question, 
+                        "not answered",
+                        'pending'
+                    )
+                    
+                    pending_message = 'Sorry, I could not find a suitable answer to your question. We sent this question to our team to answer you as soon as possible.'
+                    
+                    return jsonify({
+                        "answers": [pending_message],
+                        "confidence_scores": [0.0],
+                        "question_id": question_id,
+                        "status": "pending",
+                        "session_id": session_id
+                    }), 200
+                    
+                except Exception as e:
+                    print(f"Vector similarity search failed for English question: {e}")
+                    # Save as pending if vector search fails
+                    question_id = store_question(
+                        original_question, 
+                        "not answered",
+                        'pending'
+                    )
+                    
+                    pending_message = 'Sorry, I could not find a suitable answer to your question. We sent this question to our team to answer you as soon as possible.'
+                    
+                    return jsonify({
+                        "answers": [pending_message],
+                        "confidence_scores": [0.0],
+                        "question_id": question_id,
+                        "status": "pending",
+                        "session_id": session_id
+                    }), 200
+            
+            # ARABIC QUESTIONS: Use Arabic model only (NO vector similarity, NO translation)
             else:
-                arabic_question = original_question
-            
-            # Retrieve passages using the Arabic question
-            results = retrieve_passage(arabic_question, top_k=top_k)
-            
-            if not results:
-                # SAVE TO DATABASE - No results found
-                question_id = store_question(
-                    original_question, 
-                    "not answered",
-                    'pending'
-                )
+                print("Arabic question detected - using Arabic model directly (NO vector similarity, NO translation)")
                 
-                pending_message = (user_language == 'ar' and detected_lang == 'ar') \
-                    and 'عذرًا، لم أجد إجابة مناسبة لسؤالك، لقد أرسلنا سؤالك لفريقنا للإجابة عليه في أقرب وقت ممكن.' \
-                    or 'Sorry, I could not find a suitable answer to your question, we sent this question to our team to answer you as soon as possible.'
+                # Use Arabic question directly with the model
+                results = retrieve_passage(original_question, top_k=top_k)
                 
-                print(f"No model results - saved to database with ID: {question_id}")
+                if not results:
+                    # SAVE TO DATABASE - No results found
+                    question_id = store_question(
+                        original_question, 
+                        "not answered",
+                        'pending'
+                    )
+                    
+                    pending_message = 'عذرًا، لم أجد إجابة مناسبة لسؤالك، لقد أرسلنا سؤالك لفريقنا للإجابة عليه في أقرب وقت ممكن.'
+                    
+                    print(f"No Arabic model results - saved to database with ID: {question_id}")
+                    
+                    return jsonify({
+                        "answers": [pending_message],
+                        "confidence_scores": [0.0],
+                        "question_id": question_id,
+                        "status": "pending",
+                        "session_id": session_id
+                    }), 200
                 
-                return jsonify({
-                    "answers": [pending_message],
-                    "confidence_scores": [0.0],
-                    "question_id": question_id,
-                    "status": "pending",
-                    "session_id": session_id
-                }), 200
-            
-            # Extract answers and confidence scores
-            arabic_answers = [result["text"] for result in results]
-            confidence_scores = [result["score"] for result in results]
-            
-            # Get top answer and confidence
-            top_answer = arabic_answers[0]
-            top_confidence = confidence_scores[0]
-            
-            # Normalize confidence if needed
-            if top_confidence > 1.0:
-                top_confidence = 1 / (1 + math.exp(-top_confidence))
-            
-            print(f"Confidence score: {top_confidence}")
-            
-            # Check confidence threshold
-            if top_confidence < 0.1:  # Less than 10%
-                # SAVE TO DATABASE - Low confidence
-                question_id = store_question(
-                    original_question, 
-                    "not answered",
-                    'pending'
-                )
+                # Extract answers and confidence scores
+                arabic_answers = [result["text"] for result in results]
+                confidence_scores = [result["score"] for result in results]
                 
-                pending_message = (user_language == 'ar' and detected_lang == 'ar') \
-                    and 'عذرًا، لم أجد إجابة مناسبة لسؤالك، لقد أرسلنا سؤالك لفريقنا للإجابة عليه في أقرب وقت ممكن.' \
-                    or 'Sorry, I could not find a suitable answer to your question, we sent this question to our team to answer you as soon as possible.'
+                # Get top answer and confidence
+                top_answer = arabic_answers[0]
+                top_confidence = confidence_scores[0]
                 
-                print(f"Low confidence - saved to database with ID: {question_id}")
+                # Normalize confidence if needed
+                if top_confidence > 1.0:
+                    top_confidence = 1 / (1 + math.exp(-top_confidence))
                 
-                return jsonify({
-                    "answers": [pending_message],
-                    "confidence_scores": [top_confidence],
-                    "question_id": question_id,
-                    "status": "pending",
-                    "session_id": session_id
-                }), 200
-            
-            # High confidence - translate if needed and store as answered
-            if user_language == 'en' and arabic_answers:
-                english_answers = []
-                for answer in arabic_answers:
-                    translated_answer = translate_text(answer, 'en')
-                    english_answers.append(translated_answer)
-                    print(f"Translated answer to English: {translated_answer}")
-                final_answers = english_answers
-                final_answer = final_answers[0]
-            else:
+                print(f"Arabic model confidence score: {top_confidence}")
+                
+                # Check confidence threshold
+                if top_confidence < 0.1:  # Less than 10%
+                    # SAVE TO DATABASE - Low confidence
+                    question_id = store_question(
+                        original_question, 
+                        "not answered",
+                        'pending'
+                    )
+                    
+                    pending_message = 'عذرًا، لم أجد إجابة مناسبة لسؤالك، لقد أرسلنا سؤالك لفريقنا للإجابة عليه في أقرب وقت ممكن.'
+                    
+                    print(f"Low confidence from Arabic model - saved to database with ID: {question_id}")
+                    
+                    return jsonify({
+                        "answers": [pending_message],
+                        "confidence_scores": [top_confidence],
+                        "question_id": question_id,
+                        "status": "pending",
+                        "session_id": session_id
+                    }), 200
+                
+                # High confidence - use Arabic answers directly (NO translation)
                 final_answers = arabic_answers
                 final_answer = final_answers[0]
-            
-            # SAVE TO DATABASE - High confidence model answer
-            question_id = store_question(
-                original_question,
-                final_answer,
-                'answered'
-            )
-            
-            print(f"Model answer provided - saved to database with ID: {question_id}")
-            
-            return jsonify({
-                "answers": final_answers,
-                "confidence_scores": confidence_scores,
-                "question_id": question_id,
-                "status": "answered",
-                "session_id": session_id
-            }), 200
+                
+                # SAVE TO DATABASE - High confidence Arabic model answer
+                question_id = store_question(
+                    original_question,
+                    final_answer,
+                    'answered'
+                )
+                
+                print(f"Arabic model answer provided - saved to database with ID: {question_id}")
+                
+                return jsonify({
+                    "answers": final_answers,
+                    "confidence_scores": confidence_scores,
+                    "question_id": question_id,
+                    "status": "answered",
+                    "session_id": session_id
+                }), 200
         
     except Exception as e:
         print(f"Error in ask_question: {e}")
